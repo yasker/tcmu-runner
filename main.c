@@ -56,14 +56,12 @@ static struct genl_ops tcmu_ops = {
 	.o_ncmds	= ARRAY_SIZE(tcmu_cmds),
 };
 
-static int my_func(struct nl_msg *msg, void *arg)
+static int cb_func(struct nl_msg *msg, void *arg)
 {
-	printf("got a callback\n");
-
 	return genl_handle_msg(msg, NULL);
 }
 
-int main()
+struct nl_sock *setup_netlink(void)
 {
 	struct nl_sock *sock;
 	int ret;
@@ -76,7 +74,7 @@ int main()
 
 	nl_socket_disable_seq_check(sock);
 
-	nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, my_func, NULL);
+	nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, cb_func, NULL);
 
 	ret = genl_connect(sock);
 	if (ret < 0) {
@@ -92,7 +90,7 @@ int main()
 
 	ret = genl_ops_resolve(sock, &tcmu_ops);
 	if (ret < 0) {
-		printf("couldn't resolve ops\n");
+		printf("couldn't resolve ops, is target_core_user.ko loaded?\n");
 		exit(1);
 	}
 
@@ -106,9 +104,30 @@ int main()
 		exit(1);
 	}
 
+	return sock;
+}
+
+int main()
+{
+	struct nl_sock *sock;
+	int ret;
+	struct pollfd pollfds[10];
+
+	sock = setup_netlink();
+	if (!sock) {
+		printf("couldn't setup netlink\n");
+		exit(1);
+	}
+
+	pollfds[0].fd = nl_socket_get_fd(sock);
+	pollfds[0].events = POLLIN;
+
 	while(1) {
-		ret = nl_recvmsgs_default(sock);
+		ret = poll(pollfds, 1, 1000);
 		printf("ret %d\n", ret);
+
+		if (ret == 1)
+			ret = nl_recvmsgs_default(sock);
 	}
 
 	return 0;
