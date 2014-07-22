@@ -56,11 +56,6 @@ static struct genl_ops tcmu_ops = {
 	.o_ncmds	= ARRAY_SIZE(tcmu_cmds),
 };
 
-static int cb_func(struct nl_msg *msg, void *arg)
-{
-	return genl_handle_msg(msg, NULL);
-}
-
 struct nl_sock *setup_netlink(void)
 {
 	struct nl_sock *sock;
@@ -74,7 +69,7 @@ struct nl_sock *setup_netlink(void)
 
 	nl_socket_disable_seq_check(sock);
 
-	nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, cb_func, NULL);
+	nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, genl_handle_msg, NULL);
 
 	ret = genl_connect(sock);
 	if (ret < 0) {
