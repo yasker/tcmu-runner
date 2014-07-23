@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/mman.h>
+#include <assert.h>
 
 #include <libnl3/netlink/genl/genl.h>
 #include <libnl3/netlink/genl/mngt.h>
@@ -14,6 +16,14 @@
 #include "darray.h"
 
 #define ARRAY_SIZE(X) (sizeof(X) / sizeof((X)[0]))
+
+struct tcmu_device {
+	int fd;
+	void *map;
+	char name[256];
+};
+
+darray(struct tcmu_device) devices = darray_new();
 
 static struct nla_policy tcmu_attr_policy[TCMU_ATTR_MAX+1] = {
 	[TCMU_ATTR_DEVICE]	= { .type = NLA_STRING },
@@ -141,55 +151,62 @@ int is_uio(const struct dirent *dirent)
 	return 1;
 }
 
-int open_devices(int **dev_fds)
+int open_devices(void)
 {
 	struct dirent **dirent_list;
 	int ret;
 	int i;
-	int *fds;
+	int dev_count = 0;
 
 	ret = scandir("/dev", &dirent_list, is_uio, alphasort);
 
 	if (ret == -1)
 		return ret;
 
-	fds = calloc(ret, sizeof(int));
-	if (!fds)
-		return -1;
-
 	for (i = 0; i < ret; i++) {
-		char tmp_path[64];
+		struct tcmu_device dev;
 
-		snprintf(tmp_path, sizeof(tmp_path), "/dev/%s", dirent_list[i]->d_name);
+		snprintf(dev.name, sizeof(dev.name), "/dev/%s", dirent_list[i]->d_name);
 
-		printf("dev %s\n", tmp_path);
-		fds[i] = open(tmp_path, O_RDWR);
+		printf("dev %s\n", dev.name);
+		dev.fd = open(dev.name, O_RDWR);
+		if (dev.fd == -1) {
+			printf("could not open %s\n", dev.name);
+			continue;
+		}
 
-		/* TODO: mmap here */
+		/* todo: find out size of map from sysfs */
+
+		dev.map = mmap(NULL, (4096 * (16+256)), PROT_READ|PROT_WRITE, MAP_SHARED, dev.fd, 0);
+		if (dev.map == MAP_FAILED) {
+			printf("could not mmap: %m\n");
+			close(dev.fd);
+		}
 
 		free(dirent_list[i]);
+
+		dev_count++;
+		darray_append(devices, dev);
 	}
 
 	free(dirent_list);
 
-	*dev_fds = fds;
-
-	return ret;
+	return dev_count;
 }
 
-void handle_device_event(void)
+void handle_device_event(struct tcmu_device *dev)
 {
-	printf("handle device event\n");
+	printf("handle device event for %s\n", dev->name);
 }
 
 int main()
 {
 	struct nl_sock *sock;
 	int ret;
-	int *dev_fds;
 	struct pollfd *pollfds;
-	int i;
+	int i = 0;
 	int num_poll_fds;
+	struct tcmu_device *dev;
 
 	sock = setup_netlink();
 	if (!sock) {
@@ -197,13 +214,14 @@ int main()
 		exit(1);
 	}
 
-	ret = open_devices(&dev_fds);
+	ret = open_devices();
+	printf("%d devices found\n", ret);
 	if (ret < 0) {
 		printf("couldn't open devices\n");
 		exit(1);
 	}
 
-	num_poll_fds = ret + 1;
+	num_poll_fds = darray_size(devices) + 1;
 
 	/* +1 for netlink socket */
 	pollfds = calloc(num_poll_fds, sizeof(struct pollfd));
@@ -212,24 +230,27 @@ int main()
 		exit(1);
 	}
 
-	pollfds[0].fd = nl_socket_get_fd(sock);
-	pollfds[0].events = POLLIN;
-
-	for (i = 0; i < num_poll_fds-1; i++) {
-		pollfds[i+1].fd = dev_fds[i];
-		pollfds[i+1].events = POLLIN;
+	darray_foreach(dev, devices) {
+		pollfds[i].fd = dev->fd;
+		pollfds[i].events = POLLIN;
+		i++;
 	}
+	pollfds[i].fd = nl_socket_get_fd(sock);
+	pollfds[i].events = POLLIN;
+	assert(i == num_poll_fds-1);
 
 	while (1) {
 		ret = poll(pollfds, num_poll_fds, -1);
 		printf("ret %d\n", ret);
 
-		for (i = 0; i < num_poll_fds; i++) {
+		for (i = 0; ret && i < num_poll_fds; i++) {
 			if (pollfds[i].revents) {
-				if (i == 0)
+				if (i == num_poll_fds-1)
 					ret = nl_recvmsgs_default(sock);
 				else
-					handle_device_event();
+					handle_device_event(&darray_item(devices, i));
+
+				ret--;
 			}
 		}
 	}
