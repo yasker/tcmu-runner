@@ -11,6 +11,7 @@
 #include <libnl3/netlink/genl/mngt.h>
 #include <libnl3/netlink/genl/ctrl.h>
 #include "../kernel/drivers/target/target_core_user.h"
+#include "darray.h"
 
 #define ARRAY_SIZE(X) (sizeof(X) / sizeof((X)[0]))
 
