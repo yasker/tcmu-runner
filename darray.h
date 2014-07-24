@@ -348,3 +348,10 @@ Examples:
 	
 	darray_free(fractions);
 */
+
+/* added by me */
+#define darray_remove(arr, i) do {		\
+	if (i < arr.size-1)					\
+		memmove(&(arr).item[i], &(arr).item[i+1], ((arr).size-1-i)*sizeof(*(arr).item)); \
+	(arr).size--;							\
+	} while (0)
