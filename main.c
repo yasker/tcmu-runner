@@ -191,10 +191,9 @@ int open_devices(void)
 
 	for (i = 0; i < ret; i++) {
 		ret = open_device(dirent_list[i]->d_name);
+		free(dirent_list[i]);
 		if (ret < 0)
 			continue;
-
-		free(dirent_list[i]);
 
 		dev_count++;
 	}
