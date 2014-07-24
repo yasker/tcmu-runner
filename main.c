@@ -151,6 +151,32 @@ int is_uio(const struct dirent *dirent)
 	return 1;
 }
 
+int open_device(char *dev_path)
+{
+	struct tcmu_device dev;
+
+	snprintf(dev.name, sizeof(dev.name), "/dev/%s", dev_path);
+
+	printf("dev %s\n", dev.name);
+	dev.fd = open(dev.name, O_RDWR);
+	if (dev.fd == -1) {
+		printf("could not open %s\n", dev.name);
+		return -1;
+	}
+
+	/* todo: find out size of map from sysfs */
+
+	dev.map = mmap(NULL, (4096 * (16+256)), PROT_READ|PROT_WRITE, MAP_SHARED, dev.fd, 0);
+	if (dev.map == MAP_FAILED) {
+		printf("could not mmap: %m\n");
+		close(dev.fd);
+	}
+
+	darray_append(devices, dev);
+
+	return 0;
+}
+
 int open_devices(void)
 {
 	struct dirent **dirent_list;
@@ -164,29 +190,13 @@ int open_devices(void)
 		return ret;
 
 	for (i = 0; i < ret; i++) {
-		struct tcmu_device dev;
-
-		snprintf(dev.name, sizeof(dev.name), "/dev/%s", dirent_list[i]->d_name);
-
-		printf("dev %s\n", dev.name);
-		dev.fd = open(dev.name, O_RDWR);
-		if (dev.fd == -1) {
-			printf("could not open %s\n", dev.name);
+		ret = open_device(dirent_list[i]->d_name);
+		if (ret < 0)
 			continue;
-		}
-
-		/* todo: find out size of map from sysfs */
-
-		dev.map = mmap(NULL, (4096 * (16+256)), PROT_READ|PROT_WRITE, MAP_SHARED, dev.fd, 0);
-		if (dev.map == MAP_FAILED) {
-			printf("could not mmap: %m\n");
-			close(dev.fd);
-		}
 
 		free(dirent_list[i]);
 
 		dev_count++;
-		darray_append(devices, dev);
 	}
 
 	free(dirent_list);
