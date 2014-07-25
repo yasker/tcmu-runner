@@ -203,9 +203,11 @@ int open_devices(void)
 	return dev_count;
 }
 
-void handle_device_event(struct tcmu_device *dev)
+int handle_device_event(struct tcmu_device *dev)
 {
 	printf("handle device event for %s\n", dev->name);
+
+	return 0;
 }
 
 int main()
@@ -239,6 +241,7 @@ int main()
 		exit(1);
 	}
 
+	/* polling 0..n device fds followed by the one netlink fd */
 	darray_foreach(dev, devices) {
 		pollfds[i].fd = dev->fd;
 		pollfds[i].events = POLLIN;
@@ -249,17 +252,22 @@ int main()
 	assert(i == num_poll_fds-1);
 
 	while (1) {
-		ret = poll(pollfds, num_poll_fds, -1);
-		printf("ret %d\n", ret);
+		int events = poll(pollfds, num_poll_fds, -1);
+		printf("%d fds active\n", events);
 
-		for (i = 0; ret && i < num_poll_fds; i++) {
+		for (i = 0; events && i < num_poll_fds; i++) {
 			if (pollfds[i].revents) {
-				if (i == num_poll_fds-1)
+				if (i == num_poll_fds-1) {
 					ret = nl_recvmsgs_default(sock);
-				else
-					handle_device_event(&darray_item(devices, i));
+					if (ret < 0)
+						printf("nl_recvmsgs error %d\n", ret);
+				} else {
+					ret = handle_device_event(&darray_item(devices, i));
+					if (ret < 0)
+						printf("handle_device_event error %d\n", ret);
+				}
 
-				ret--;
+				events--;
 			}
 		}
 	}
