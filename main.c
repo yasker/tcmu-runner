@@ -210,27 +210,13 @@ int handle_device_event(struct tcmu_device *dev)
 	return 0;
 }
 
-int main()
+int event_poll(struct nl_sock *sock)
 {
-	struct nl_sock *sock;
 	int ret;
 	struct pollfd *pollfds;
 	int i = 0;
 	int num_poll_fds;
 	struct tcmu_device *dev;
-
-	sock = setup_netlink();
-	if (!sock) {
-		printf("couldn't setup netlink\n");
-		exit(1);
-	}
-
-	ret = open_devices();
-	printf("%d devices found\n", ret);
-	if (ret < 0) {
-		printf("couldn't open devices\n");
-		exit(1);
-	}
 
 	num_poll_fds = darray_size(devices) + 1;
 
@@ -251,24 +237,53 @@ int main()
 	pollfds[i].events = POLLIN;
 	assert(i == num_poll_fds-1);
 
-	while (1) {
-		int events = poll(pollfds, num_poll_fds, -1);
-		printf("%d fds active\n", events);
+	int events = poll(pollfds, num_poll_fds, -1);
+	printf("%d fds active\n", events);
 
-		for (i = 0; events && i < num_poll_fds; i++) {
-			if (pollfds[i].revents) {
-				if (i == num_poll_fds-1) {
-					ret = nl_recvmsgs_default(sock);
-					if (ret < 0)
-						printf("nl_recvmsgs error %d\n", ret);
-				} else {
-					ret = handle_device_event(&darray_item(devices, i));
-					if (ret < 0)
-						printf("handle_device_event error %d\n", ret);
-				}
-
-				events--;
+	for (i = 0; events && i < num_poll_fds; i++) {
+		if (pollfds[i].revents) {
+			if (i == num_poll_fds-1) {
+				ret = nl_recvmsgs_default(sock);
+				if (ret < 0)
+					printf("nl_recvmsgs error %d\n", ret);
+			} else {
+				ret = handle_device_event(&darray_item(devices, i));
+				if (ret < 0)
+					printf("handle_device_event error %d\n", ret);
 			}
+
+			events--;
+		}
+	}
+
+	free(pollfds);
+
+	return 0;
+}
+
+int main()
+{
+	struct nl_sock *nl_sock;
+	int ret;
+
+	nl_sock = setup_netlink();
+	if (!nl_sock) {
+		printf("couldn't setup netlink\n");
+		exit(1);
+	}
+
+	ret = open_devices();
+	printf("%d devices found\n", ret);
+	if (ret < 0) {
+		printf("couldn't open devices\n");
+		exit(1);
+	}
+
+	while (1) {
+		ret = event_poll(nl_sock);
+		if (ret < 0) {
+			printf("event poll returned %d", ret);
+			exit(1);
 		}
 	}
 
