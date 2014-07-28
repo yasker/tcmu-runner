@@ -33,15 +33,18 @@ static struct nla_policy tcmu_attr_policy[TCMU_ATTR_MAX+1] = {
 	[TCMU_ATTR_DEVICE]	= { .type = NLA_STRING },
 };
 
+int add_device(char *dev_name);
+void remove_device(char *dev_name);
+
 static int parse_added_device(struct nl_cache_ops *unused, struct genl_cmd *cmd,
                          struct genl_info *info, void *arg)
 {
-	printf("device added!\n");
+	if (info->attrs[TCMU_ATTR_MINOR]) {
+		char buf[32];
 
-	if (info->attrs[TCMU_ATTR_DEVICE])
-		printf("sup! %s\n", nla_get_string(info->attrs[TCMU_ATTR_DEVICE]));
-	else
-		printf("DOH\n");
+		snprintf(buf, sizeof(buf), "uio%d", nla_get_u32(info->attrs[TCMU_ATTR_MINOR]));
+		add_device(buf);
+	}
 
 	return 0;
 }
@@ -49,7 +52,12 @@ static int parse_added_device(struct nl_cache_ops *unused, struct genl_cmd *cmd,
 static int parse_removed_device(struct nl_cache_ops *unused, struct genl_cmd *cmd,
                          struct genl_info *info, void *arg)
 {
-	printf("device removed!\n");
+	if (info->attrs[TCMU_ATTR_MINOR]) {
+		char buf[32];
+
+		snprintf(buf, sizeof(buf), "uio%d", nla_get_u32(info->attrs[TCMU_ATTR_MINOR]));
+		remove_device(buf);
+	}
 
 	return 0;
 }
@@ -206,7 +214,7 @@ int add_device(char *dev_name)
 	return 0;
 }
 
-void remove_device(char *dev_path)
+void remove_device(char *dev_name)
 {
 	struct tcmu_device *dev;
 	int i = 0;
@@ -214,7 +222,7 @@ void remove_device(char *dev_path)
 	int ret;
 
 	darray_foreach(dev, devices) {
-		if (!strncmp(dev->name, dev_path, sizeof(*dev->name)))
+		if (strncmp(dev->name, dev_name, strnlen(dev->name, sizeof(dev->name))))
 			i++;
 		else {
 			found = true;
@@ -223,7 +231,7 @@ void remove_device(char *dev_path)
 	}
 
 	if (!found) {
-		printf("could not remove device %s: not found\n", dev_path);
+		printf("could not remove device %s: not found\n", dev_name);
 		return;
 	}
 
