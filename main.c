@@ -36,27 +36,27 @@ static struct nla_policy tcmu_attr_policy[TCMU_ATTR_MAX+1] = {
 int add_device(char *dev_name);
 void remove_device(char *dev_name);
 
-static int parse_added_device(struct nl_cache_ops *unused, struct genl_cmd *cmd,
-                         struct genl_info *info, void *arg)
+static int handle_netlink(struct nl_cache_ops *unused, struct genl_cmd *cmd,
+			  struct genl_info *info, void *arg)
 {
-	if (info->attrs[TCMU_ATTR_MINOR]) {
-		char buf[32];
+	char buf[32];
 
-		snprintf(buf, sizeof(buf), "uio%d", nla_get_u32(info->attrs[TCMU_ATTR_MINOR]));
-		add_device(buf);
+	if (!info->attrs[TCMU_ATTR_MINOR]) {
+		printf("TCMU_ATTR_MINOR not set, doing nothing\n");
+		return 0;
 	}
 
-	return 0;
-}
+	snprintf(buf, sizeof(buf), "uio%d", nla_get_u32(info->attrs[TCMU_ATTR_MINOR]));
 
-static int parse_removed_device(struct nl_cache_ops *unused, struct genl_cmd *cmd,
-                         struct genl_info *info, void *arg)
-{
-	if (info->attrs[TCMU_ATTR_MINOR]) {
-		char buf[32];
-
-		snprintf(buf, sizeof(buf), "uio%d", nla_get_u32(info->attrs[TCMU_ATTR_MINOR]));
+	switch (cmd->c_id) {
+	case TCMU_CMD_ADDED_DEVICE:
+		add_device(buf);
+		break;
+	case TCMU_CMD_REMOVED_DEVICE:
 		remove_device(buf);
+		break;
+	default:
+		printf("Unknown notification %d\n", cmd->c_id);
 	}
 
 	return 0;
@@ -66,14 +66,14 @@ static struct genl_cmd tcmu_cmds[] = {
 	{
 		.c_id		= TCMU_CMD_ADDED_DEVICE,
 		.c_name		= "ADDED DEVICE",
-		.c_msg_parser	= parse_added_device,
+		.c_msg_parser	= handle_netlink,
 		.c_maxattr	= TCMU_ATTR_MAX,
 		.c_attr_policy	= tcmu_attr_policy,
 	},
 	{
 		.c_id		= TCMU_CMD_REMOVED_DEVICE,
 		.c_name		= "REMOVED DEVICE",
-		.c_msg_parser	= parse_removed_device,
+		.c_msg_parser	= handle_netlink,
 		.c_maxattr	= TCMU_ATTR_MAX,
 		.c_attr_policy	= tcmu_attr_policy,
 	},
