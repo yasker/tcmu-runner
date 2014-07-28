@@ -1,5 +1,8 @@
 #define _BITS_UIO_H
+#include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <limits.h>
 #include <errno.h>
 #include <dirent.h>
 #include <sys/types.h>
@@ -20,6 +23,7 @@
 struct tcmu_device {
 	int fd;
 	void *map;
+	size_t map_len;
 	char name[256];
 };
 
@@ -151,22 +155,47 @@ int is_uio(const struct dirent *dirent)
 	return 1;
 }
 
-int open_device(char *dev_path)
+int add_device(char *dev_name)
 {
 	struct tcmu_device dev;
+	char str_buf[64];
+	int fd;
+	int ret;
 
-	snprintf(dev.name, sizeof(dev.name), "/dev/%s", dev_path);
+	snprintf(dev.name, sizeof(dev.name), "%s", dev_name);
+	snprintf(str_buf, sizeof(str_buf), "/dev/%s", dev_name);
+	printf("dev %s\n", str_buf);
 
-	printf("dev %s\n", dev.name);
-	dev.fd = open(dev.name, O_RDWR);
+	dev.fd = open(str_buf, O_RDWR);
 	if (dev.fd == -1) {
 		printf("could not open %s\n", dev.name);
 		return -1;
 	}
 
-	/* todo: find out size of map from sysfs */
+	snprintf(str_buf, sizeof(str_buf), "/sys/class/uio/%s/maps/map0/size", dev.name);
+	fd = open(str_buf, O_RDONLY);
+	if (fd == -1) {
+		printf("could not open %s\n", dev.name);
+		close(dev.fd);
+		return -1;
+	}
 
-	dev.map = mmap(NULL, (4096 * (16+256)), PROT_READ|PROT_WRITE, MAP_SHARED, dev.fd, 0);
+	ret = read(fd, str_buf, sizeof(str_buf));
+	close(fd);
+	if (ret <= 0) {
+		printf("could not read size of map0\n");
+		close(dev.fd);
+		return -1;
+	}
+
+	dev.map_len = strtoull(str_buf, NULL, 0);
+	if (dev.map_len == ULLONG_MAX) {
+		printf("could not get map length\n");
+		close(dev.fd);
+		return -1;
+	}
+
+	dev.map = mmap(NULL, dev.map_len, PROT_READ|PROT_WRITE, MAP_SHARED, dev.fd, 0);
 	if (dev.map == MAP_FAILED) {
 		printf("could not mmap: %m\n");
 		close(dev.fd);
@@ -177,30 +206,60 @@ int open_device(char *dev_path)
 	return 0;
 }
 
+void remove_device(char *dev_path)
+{
+	struct tcmu_device *dev;
+	int i = 0;
+	bool found = false;
+	int ret;
+
+	darray_foreach(dev, devices) {
+		if (!strncmp(dev->name, dev_path, sizeof(*dev->name)))
+			i++;
+		else {
+			found = true;
+			break;
+		}
+	}
+
+	if (!found) {
+		printf("could not remove device %s: not found\n", dev_path);
+		return;
+	}
+
+	ret = munmap(dev->map, dev->map_len);
+	if (ret < 0)
+		printf("munmap of %s failed\n", dev->name);
+
+	close(dev->fd);
+
+	darray_remove(devices, i);
+}
+
 int open_devices(void)
 {
 	struct dirent **dirent_list;
-	int ret;
+	int num_devs;
+	int num_good_devs = 0;
 	int i;
-	int dev_count = 0;
 
-	ret = scandir("/dev", &dirent_list, is_uio, alphasort);
+	num_devs = scandir("/dev", &dirent_list, is_uio, alphasort);
 
-	if (ret == -1)
-		return ret;
+	if (num_devs == -1)
+		return -1;
 
-	for (i = 0; i < ret; i++) {
-		ret = open_device(dirent_list[i]->d_name);
+	for (i = 0; i < num_devs; i++) {
+		int ret = add_device(dirent_list[i]->d_name);
 		free(dirent_list[i]);
 		if (ret < 0)
 			continue;
 
-		dev_count++;
+		num_good_devs++;
 	}
 
 	free(dirent_list);
 
-	return dev_count;
+	return num_good_devs;
 }
 
 int handle_device_event(struct tcmu_device *dev)
