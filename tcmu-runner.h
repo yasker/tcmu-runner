@@ -11,6 +11,7 @@ struct tcmu_device {
 	void *map;
 	size_t map_len;
 	char name[16]; /* e.g. "uio14" */
+	char cfgstring[256];
 
 	void *hm_private; /* private ptr for handler module */
 };
@@ -20,7 +21,7 @@ struct tcmu_handler {
 	const char *subtype;	/* Name for cfgstring matching */
 
 	/* Per-device added/removed callbacks */
-	int (*open)(struct tcmu_device *dev, char *cfgstring);
+	int (*open)(struct tcmu_device *dev);
 	void (*close)(struct tcmu_device *dev);
 
 	int (*cmd_submit)(struct tcmu_device *dev, char *cmd);

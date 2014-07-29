@@ -50,15 +50,15 @@ static struct nla_policy tcmu_attr_policy[TCMU_ATTR_MAX+1] = {
 	[TCMU_ATTR_MINOR]	= { .type = NLA_U32 },
 };
 
-int add_device(char *dev_name);
-void remove_device(char *dev_name);
+int add_device(char *dev_name, char *cfgstring);
+void remove_device(char *dev_name, char *cfgstring);
 
 static int handle_netlink(struct nl_cache_ops *unused, struct genl_cmd *cmd,
 			  struct genl_info *info, void *arg)
 {
 	char buf[32];
 
-	if (!info->attrs[TCMU_ATTR_MINOR]) {
+	if (!info->attrs[TCMU_ATTR_MINOR] || !info->attrs[TCMU_ATTR_DEVICE]) {
 		printf("TCMU_ATTR_MINOR not set, doing nothing\n");
 		return 0;
 	}
@@ -67,10 +67,10 @@ static int handle_netlink(struct nl_cache_ops *unused, struct genl_cmd *cmd,
 
 	switch (cmd->c_id) {
 	case TCMU_CMD_ADDED_DEVICE:
-		add_device(buf);
+		add_device(buf, nla_get_string(info->attrs[TCMU_ATTR_DEVICE]));
 		break;
 	case TCMU_CMD_REMOVED_DEVICE:
-		remove_device(buf);
+		remove_device(buf, nla_get_string(info->attrs[TCMU_ATTR_DEVICE]));
 		break;
 	default:
 		printf("Unknown notification %d\n", cmd->c_id);
@@ -233,20 +233,39 @@ int is_uio(const struct dirent *dirent)
 
 	/* we only want uio devices whose name is a format we expect */
 	snprintf(tmp_path, sizeof(tmp_path), "tcm-user+%s/", "srv");
-	if (strncmp(buf, tmp_path, strlen(tmp_path)))
+	if (strncmp(buf, "tcm-user+", 9))
 		return 0;
 
 	return 1;
 }
 
-int add_device(char *dev_name)
+struct tcmu_handler *find_handler(char *cfgstring)
+{
+	struct tcmu_handler *handler;
+	char *subtype;
+
+	subtype = strtok(cfgstring, "/");
+	if (!subtype)
+		subtype = cfgstring;
+
+	darray_foreach(handler, handlers) {
+		if (!strcmp(subtype, handler->subtype))
+		    return handler;
+	}
+
+	return NULL;
+}
+
+int add_device(char *dev_name, char *cfgstring)
 {
 	struct tcmu_device dev;
+	struct tcmu_handler *handler;
 	char str_buf[64];
 	int fd;
 	int ret;
 
 	snprintf(dev.name, sizeof(dev.name), "%s", dev_name);
+	snprintf(dev.cfgstring, sizeof(dev.cfgstring), "%s", cfgstring+9);
 	snprintf(str_buf, sizeof(str_buf), "/dev/%s", dev_name);
 	printf("dev %s\n", str_buf);
 
@@ -285,14 +304,31 @@ int add_device(char *dev_name)
 		close(dev.fd);
 	}
 
+	handler = find_handler(dev.cfgstring);
+	if (!handler) {
+		printf("could not find handler for %s\n", dev.name);
+		munmap(dev.map, dev.map_len);
+		close(dev.fd);
+		return -1;
+	}
+
+	ret = handler->open(&dev);
+	if (ret < 0) {
+		printf("handler open failed for %s\n", dev.name);
+		munmap(dev.map, dev.map_len);
+		close(dev.fd);
+		return -1;
+	}
+
 	darray_append(devices, dev);
 
 	return 0;
 }
 
-void remove_device(char *dev_name)
+void remove_device(char *dev_name, char *cfgstring)
 {
 	struct tcmu_device *dev;
+	struct tcmu_handler *handler;
 	int i = 0;
 	bool found = false;
 	int ret;
@@ -310,6 +346,10 @@ void remove_device(char *dev_name)
 		printf("could not remove device %s: not found\n", dev_name);
 		return;
 	}
+
+	handler = find_handler(dev->cfgstring);
+	if (handler)
+		handler->close(dev);
 
 	ret = munmap(dev->map, dev->map_len);
 	if (ret < 0)
@@ -333,14 +373,36 @@ int open_devices(void)
 		return -1;
 
 	for (i = 0; i < num_devs; i++) {
-		int ret = add_device(dirent_list[i]->d_name);
-		free(dirent_list[i]);
+		char tmp_path[64];
+		char buf[256];
+		int fd;
+		int ret;
+
+		snprintf(tmp_path, sizeof(tmp_path), "/sys/class/uio/%s/name",
+			 dirent_list[i]->d_name);
+
+		fd = open(tmp_path, O_RDONLY);
+		if (fd == -1) {
+			printf("could not open %s!\n", tmp_path);
+			continue;
+		}
+
+		ret = read(fd, buf, sizeof(buf));
+		close(fd);
+		if (ret <= 0 || ret >= sizeof(buf)) {
+			printf("read of %s had issues\n", tmp_path);
+			continue;
+		}
+
+		ret = add_device(dirent_list[i]->d_name, buf);
 		if (ret < 0)
 			continue;
 
 		num_good_devs++;
 	}
 
+	for (i = 0; i < num_devs; i++)
+		free(dirent_list[i]);
 	free(dirent_list);
 
 	return num_good_devs;

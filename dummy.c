@@ -96,7 +96,7 @@ int handle_device_event(struct tcmu_device *dev)
 	return 0;
 }
 
-int dummy_open(struct tcmu_device *dev, char *cfgstring)
+int dummy_open(struct tcmu_device *dev)
 {
 	return 0;
 }
