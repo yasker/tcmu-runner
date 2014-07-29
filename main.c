@@ -33,20 +33,17 @@
 #include <libnl3/netlink/genl/ctrl.h>
 #include "../kernel/drivers/target/target_core_user.h"
 #include "darray.h"
+#include "tcmu-runner.h"
 
 #define ARRAY_SIZE(X) (sizeof(X) / sizeof((X)[0]))
 
-struct tcmu_device {
-	int fd;
-	void *map;
-	size_t map_len;
-	char name[256];
-};
-
 darray(struct tcmu_device) devices = darray_new();
+
+darray(struct tcmu_handler_module) modules = darray_new();
 
 static struct nla_policy tcmu_attr_policy[TCMU_ATTR_MAX+1] = {
 	[TCMU_ATTR_DEVICE]	= { .type = NLA_STRING },
+	[TCMU_ATTR_MINOR]	= { .type = NLA_U32 },
 };
 
 int add_device(char *dev_name);
@@ -145,6 +142,11 @@ struct nl_sock *setup_netlink(void)
 	}
 
 	return sock;
+}
+
+int open_handlers(void)
+{
+	return 0;
 }
 
 int is_uio(const struct dirent *dirent)
@@ -286,9 +288,91 @@ int open_devices(void)
 	return num_good_devs;
 }
 
+int block_size = 4096;
+
+int handle_one_command(struct tcmu_mailbox *mb, struct tcmu_cmd_entry *ent)
+{
+	uint8_t cmd;
+	uint8_t *cdb;
+
+	printf("handling a command!\n");
+
+	cdb = (void *)mb + ent->req.cdb_off;
+
+	cmd = cdb[0];
+
+	printf("cmd = 0x%x\n", cmd);
+
+	if (cmd == 0x28) { // READ 10
+		int i;
+		int data_bytes;
+		int remaining;
+		struct iovec *iov;
+
+		for (i = 0; i < 10; i++) {
+			printf("%x ", cdb[i]);
+		}
+		printf("\n");
+
+		/* clients must lookup block size from configfs */
+		data_bytes = block_size * cdb[8];
+		printf("iov_cnt %d data bytes %d\n", ent->req.iov_cnt, data_bytes);
+
+		remaining = data_bytes;
+		iov = &ent->req.iov[0];
+
+		while (remaining) {
+			memset((void *) mb + (size_t) iov->iov_base, 0, iov->iov_len);
+
+			remaining -= iov->iov_len;
+			iov++;
+		}
+
+		ent->rsp.scsi_status = 0;
+	}
+	else {
+		printf("unknown command %x\n", cdb[0]);
+	}
+
+	return 0;
+}
+
+void poke_kernel(int fd)
+{
+	uint32_t buf = 0xabcdef12;
+
+	printf("poke kernel\n");
+	write(fd, &buf, 4);
+}
+
 int handle_device_event(struct tcmu_device *dev)
 {
-	printf("handle device event for %s\n", dev->name);
+	struct tcmu_cmd_entry *ent;
+	struct tcmu_mailbox *mb = dev->map;
+	int did_some_work = 0;
+
+	ent = (void *) mb + mb->cmdr_off + mb->cmd_tail;
+
+	printf("ent addr1 %p mb %p cmd_tail %lu cmd_head %lu\n", ent, mb, mb->cmd_tail, mb->cmd_head);
+
+	while (ent != (void *)mb + mb->cmdr_off + mb->cmd_head) {
+
+		if (tcmu_hdr_get_op(&ent->hdr) == TCMU_OP_CMD) {
+			printf("handling a command entry, len %d\n", tcmu_hdr_get_len(&ent->hdr));
+			handle_one_command(mb, ent);
+		}
+		else {
+			printf("handling a pad entry, len %d\n", tcmu_hdr_get_len(&ent->hdr));
+		}
+
+		mb->cmd_tail = (mb->cmd_tail + tcmu_hdr_get_len(&ent->hdr)) % mb->cmdr_size;
+		ent = (void *) mb + mb->cmdr_off + mb->cmd_tail;
+		printf("ent addr2 %p\n", ent);
+		did_some_work = 1;
+	}
+
+	if (did_some_work)
+		poke_kernel(dev->fd);
 
 	return 0;
 }
@@ -300,6 +384,7 @@ int event_poll(struct nl_sock *sock)
 	int i = 0;
 	int num_poll_fds;
 	struct tcmu_device *dev;
+	int events;
 
 	num_poll_fds = darray_size(devices) + 1;
 
@@ -320,7 +405,7 @@ int event_poll(struct nl_sock *sock)
 	pollfds[i].events = POLLIN;
 	assert(i == num_poll_fds-1);
 
-	int events = poll(pollfds, num_poll_fds, -1);
+	events = poll(pollfds, num_poll_fds, -1);
 	printf("%d fds active\n", events);
 
 	for (i = 0; events && i < num_poll_fds; i++) {
@@ -353,6 +438,16 @@ int main()
 	if (!nl_sock) {
 		printf("couldn't setup netlink\n");
 		exit(1);
+	}
+
+	ret = open_handlers();
+	printf("%d handlers found\n", ret);
+	if (ret < 0) {
+		printf("couldn't open handlers\n");
+		exit(1);
+	}
+	else if (!ret) {
+		printf("No handlers, how's this gonna work???\n");
 	}
 
 	ret = open_devices();
