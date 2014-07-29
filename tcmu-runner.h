@@ -15,7 +15,7 @@ struct tcmu_device {
 	void *hm_private; /* private ptr for handler module */
 };
 
-struct tcmu_handler_module {
+struct tcmu_handler {
 	const char *name;	/* Human-friendly name */
 	const char *subtype;	/* Name for cfgstring matching */
 

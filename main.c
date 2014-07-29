@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <assert.h>
+#include <dlfcn.h>
 
 #include <libnl3/netlink/genl/genl.h>
 #include <libnl3/netlink/genl/mngt.h>
@@ -37,9 +38,11 @@
 
 #define ARRAY_SIZE(X) (sizeof(X) / sizeof((X)[0]))
 
+#define HANDLER_PATH "."
+
 darray(struct tcmu_device) devices = darray_new();
 
-darray(struct tcmu_handler_module) modules = darray_new();
+darray(struct tcmu_handler) handlers = darray_new();
 
 static struct nla_policy tcmu_attr_policy[TCMU_ATTR_MAX+1] = {
 	[TCMU_ATTR_DEVICE]	= { .type = NLA_STRING },
@@ -144,9 +147,63 @@ struct nl_sock *setup_netlink(void)
 	return sock;
 }
 
+int is_handler(const struct dirent *dirent)
+{
+	if (strncmp(dirent->d_name, "handler_", 8))
+		return 0;
+
+	return 1;
+}
+
 int open_handlers(void)
 {
-	return 0;
+	struct dirent **dirent_list;
+	int num_handlers;
+	int num_good = 0;
+	int i;
+
+	num_handlers = scandir(HANDLER_PATH, &dirent_list, is_handler, alphasort);
+
+	if (num_handlers == -1)
+		return -1;
+
+	for (i = 0; i < num_handlers; i++) {
+		char *path;
+		void *handle;
+		struct tcmu_handler *tcmu_handler;
+		int ret;
+
+		ret = asprintf(&path, "%s/%s", HANDLER_PATH, dirent_list[i]->d_name);
+		free(dirent_list[i]);
+		if (ret == -1) {
+			printf("ENOMEM\n");
+			continue;
+		}
+
+		handle = dlopen(path, RTLD_NOW|RTLD_LOCAL);
+		if (!handle) {
+			printf("Could not open handler at %s\n", path);
+			free(path);
+			continue;
+		}
+
+		tcmu_handler = dlsym(handle, "handler_struct");
+		if (!tcmu_handler) {
+			printf("dlsym failure on %s\n", path);
+			free(path);
+			continue;
+		}
+
+		darray_append(handlers, *tcmu_handler);
+
+		free(path);
+
+		num_good++;
+	}
+
+	free(dirent_list);
+
+	return num_good;
 }
 
 int is_uio(const struct dirent *dirent)
