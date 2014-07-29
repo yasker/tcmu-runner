@@ -14,6 +14,7 @@
  * under the License.
 */
 
+#define _GNU_SOURCE
 #define _BITS_UIO_H
 #include <stdbool.h>
 #include <stdio.h>
@@ -373,7 +374,7 @@ int handle_one_command(struct tcmu_mailbox *mb, struct tcmu_cmd_entry *ent)
 
 		/* clients must lookup block size from configfs */
 		data_bytes = block_size * cdb[8];
-		printf("iov_cnt %d data bytes %d\n", ent->req.iov_cnt, data_bytes);
+		printf("iov_cnt %ld data bytes %d\n", ent->req.iov_cnt, data_bytes);
 
 		remaining = data_bytes;
 		iov = &ent->req.iov[0];
@@ -410,7 +411,7 @@ int handle_device_event(struct tcmu_device *dev)
 
 	ent = (void *) mb + mb->cmdr_off + mb->cmd_tail;
 
-	printf("ent addr1 %p mb %p cmd_tail %lu cmd_head %lu\n", ent, mb, mb->cmd_tail, mb->cmd_head);
+	printf("ent addr1 %p mb %p cmd_tail %u cmd_head %u\n", ent, mb, mb->cmd_tail, mb->cmd_head);
 
 	while (ent != (void *)mb + mb->cmdr_off + mb->cmd_head) {
 
