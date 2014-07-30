@@ -13,6 +13,8 @@ struct tcmu_device {
 	char name[16]; /* e.g. "uio14" */
 	char cfgstring[256];
 
+	struct tcmu_handler *handler;
+
 	void *hm_private; /* private ptr for handler module */
 };
 

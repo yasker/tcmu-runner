@@ -321,6 +321,8 @@ int add_device(char *dev_name, char *cfgstring)
 		return -1;
 	}
 
+	dev.handler = handler;
+
 	darray_append(devices, dev);
 
 	return 0;
@@ -329,7 +331,6 @@ int add_device(char *dev_name, char *cfgstring)
 void remove_device(char *dev_name, char *cfgstring)
 {
 	struct tcmu_device *dev;
-	struct tcmu_handler *handler;
 	int i = 0;
 	bool found = false;
 	int ret;
@@ -348,9 +349,8 @@ void remove_device(char *dev_name, char *cfgstring)
 		return;
 	}
 
-	handler = find_handler(dev->cfgstring);
-	if (handler)
-		handler->close(dev);
+	if (dev->handler)
+		dev->handler->close(dev);
 
 	ret = munmap(dev->map, dev->map_len);
 	if (ret < 0)
