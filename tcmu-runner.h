@@ -24,7 +24,7 @@ struct tcmu_handler {
 	int (*open)(struct tcmu_device *dev);
 	void (*close)(struct tcmu_device *dev);
 
-	int (*cmd_submit)(struct tcmu_device *dev, char *cmd);
+	bool (*cmd_submit)(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec);
 };
 
 #ifdef __cplusplus
