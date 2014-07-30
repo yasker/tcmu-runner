@@ -59,7 +59,7 @@ static int handle_netlink(struct nl_cache_ops *unused, struct genl_cmd *cmd,
 	char buf[32];
 
 	if (!info->attrs[TCMU_ATTR_MINOR] || !info->attrs[TCMU_ATTR_DEVICE]) {
-		printf("TCMU_ATTR_MINOR not set, doing nothing\n");
+		printf("TCMU_ATTR_MINOR or TCMU_ATTR_DEVICE not set, doing nothing\n");
 		return 0;
 	}
 
