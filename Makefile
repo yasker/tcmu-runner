@@ -1,5 +1,5 @@
 CFLAGS=-Wall -g -I /usr/include/libnl3
-LDLIBS=-lnl-3 -lnl-genl-3 -ldl
+LDLIBS=-lnl-3 -lnl-genl-3 -ldl -lpthread
 
 OBJECTS=main.o
 

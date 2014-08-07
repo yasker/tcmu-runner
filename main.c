@@ -30,6 +30,7 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <scsi/scsi.h>
+#include <pthread.h>
 
 #include <libnl3/netlink/genl/genl.h>
 #include <libnl3/netlink/genl/mngt.h>
@@ -45,6 +46,13 @@
 darray(struct tcmu_device) devices = darray_new();
 
 darray(struct tcmu_handler) handlers = darray_new();
+
+struct tcmu_thread {
+	pthread_t thread_id;
+	char dev_name[16]; /* e.g. "uio14" */
+};
+
+darray(struct tcmu_thread) threads = darray_new();
 
 static struct nla_policy tcmu_attr_policy[TCMU_ATTR_MAX+1] = {
 	[TCMU_ATTR_DEVICE]	= { .type = NLA_STRING },
@@ -257,86 +265,215 @@ struct tcmu_handler *find_handler(char *cfgstring)
 	return NULL;
 }
 
+int block_size = 4096;
+
+int handle_one_command(struct tcmu_device *dev,
+		       struct tcmu_mailbox *mb,
+		       struct tcmu_cmd_entry *ent)
+{
+	uint8_t *cdb;
+	int i;
+
+	cdb = (void *)mb + ent->req.cdb_off;
+
+	/* Convert iovec addrs in-place to not be offsets */
+	for (i = 0; i < ent->req.iov_cnt; i++)
+		ent->req.iov[i].iov_base = (void *) mb + (size_t)ent->req.iov[i].iov_base;
+
+	return dev->handler->cmd_submit(dev, cdb, ent->req.iov);
+}
+
+void poke_kernel(int fd)
+{
+	uint32_t buf = 0xabcdef12;
+
+	printf("poke kernel\n");
+	write(fd, &buf, 4);
+}
+
+int handle_device_events(struct tcmu_device *dev)
+{
+	struct tcmu_cmd_entry *ent;
+	struct tcmu_mailbox *mb = dev->map;
+	int did_some_work = 0;
+
+	ent = (void *) mb + mb->cmdr_off + mb->cmd_tail;
+
+	printf("ent addr1 %p mb %p cmd_tail %u cmd_head %u\n", ent, mb, mb->cmd_tail, mb->cmd_head);
+
+	while (ent != (void *)mb + mb->cmdr_off + mb->cmd_head) {
+
+		if (tcmu_hdr_get_op(&ent->hdr) == TCMU_OP_CMD) {
+			printf("handling a command entry, len %d\n", tcmu_hdr_get_len(&ent->hdr));
+			if (handle_one_command(dev, mb, ent)) {
+				ent->rsp.scsi_status = NO_SENSE;
+			}
+			else {
+				/* Tell the kernel we didn't handle it */
+				char *buf = ent->rsp.sense_buffer;
+
+				ent->rsp.scsi_status = CHECK_CONDITION;
+
+				buf[0] = 0x70;	/* fixed, current */
+				buf[2] = 0x5;	/* illegal request */
+				buf[7] = 0xa;
+				buf[12] = 0x20;	/* ASC: invalid command operation code */
+				buf[13] = 0x0;	/* ASCQ: (none) */
+			}
+
+		}
+		else {
+			printf("handling a pad entry, len %d\n", tcmu_hdr_get_len(&ent->hdr));
+		}
+
+		mb->cmd_tail = (mb->cmd_tail + tcmu_hdr_get_len(&ent->hdr)) % mb->cmdr_size;
+		ent = (void *) mb + mb->cmdr_off + mb->cmd_tail;
+		printf("ent addr2 %p\n", ent);
+		did_some_work = 1;
+	}
+
+	if (did_some_work)
+		poke_kernel(dev->fd);
+
+	return 0;
+}
+
+void thread_cleanup(void *arg)
+{
+	struct tcmu_device *dev = arg;
+
+	printf("in thread cleanup\n");
+
+	dev->handler->close(dev);
+	munmap(dev->map, dev->map_len);
+	close(dev->fd);
+	free(dev);
+}
+
+void *thread_start(void *arg)
+{
+	struct tcmu_device *dev = arg;
+
+	printf("in thread for dev %s\n", dev->name);
+
+	pthread_cleanup_push(thread_cleanup, dev);
+
+	while (1) {
+		char buf[4];
+		int ret = read(dev->fd, buf, 4);
+
+		if (ret != 4) {
+			printf("read didn't get 4! thread terminating\n");
+			break;
+		}
+
+		handle_device_events(dev);
+	}
+
+	printf("thread terminating, should never happen\n");
+
+	pthread_cleanup_pop(1);
+
+	return NULL;
+}
+
 int add_device(char *dev_name, char *cfgstring)
 {
-	struct tcmu_device dev;
-	struct tcmu_handler *handler;
+	struct tcmu_device *dev;
+	struct tcmu_thread thread;
 	char str_buf[64];
 	int fd;
 	int ret;
 
-	snprintf(dev.name, sizeof(dev.name), "%s", dev_name);
-	snprintf(dev.cfgstring, sizeof(dev.cfgstring), "%s", cfgstring+9);
-	snprintf(str_buf, sizeof(str_buf), "/dev/%s", dev_name);
-	printf("dev %s\n", str_buf);
-
-	dev.fd = open(str_buf, O_RDWR);
-	if (dev.fd == -1) {
-		printf("could not open %s\n", dev.name);
+	dev = calloc(1, sizeof(*dev));
+	if (!dev) {
+		printf("calloc failed in add_device\n");
 		return -1;
 	}
 
-	snprintf(str_buf, sizeof(str_buf), "/sys/class/uio/%s/maps/map0/size", dev.name);
+	snprintf(dev->name, sizeof(dev->name), "%s", dev_name);
+	snprintf(thread.dev_name, sizeof(thread.dev_name), "%s", dev_name);
+	snprintf(dev->cfgstring, sizeof(dev->cfgstring), "%s", cfgstring+9);
+	snprintf(str_buf, sizeof(str_buf), "/dev/%s", dev_name);
+	printf("dev %s\n", str_buf);
+
+	dev->fd = open(str_buf, O_RDWR);
+	if (dev->fd == -1) {
+		printf("could not open %s\n", dev->name);
+		goto err_free;
+	}
+
+	snprintf(str_buf, sizeof(str_buf), "/sys/class/uio/%s/maps/map0/size", dev->name);
 	fd = open(str_buf, O_RDONLY);
 	if (fd == -1) {
-		printf("could not open %s\n", dev.name);
-		close(dev.fd);
-		return -1;
+		printf("could not open %s\n", dev->name);
+		goto err_fd_close;
 	}
 
 	ret = read(fd, str_buf, sizeof(str_buf));
 	close(fd);
 	if (ret <= 0) {
 		printf("could not read size of map0\n");
-		close(dev.fd);
-		return -1;
+		goto err_fd_close;
 	}
 
-	dev.map_len = strtoull(str_buf, NULL, 0);
-	if (dev.map_len == ULLONG_MAX) {
+	dev->map_len = strtoull(str_buf, NULL, 0);
+	if (dev->map_len == ULLONG_MAX) {
 		printf("could not get map length\n");
-		close(dev.fd);
-		return -1;
+		goto err_fd_close;
 	}
 
-	dev.map = mmap(NULL, dev.map_len, PROT_READ|PROT_WRITE, MAP_SHARED, dev.fd, 0);
-	if (dev.map == MAP_FAILED) {
+	dev->map = mmap(NULL, dev->map_len, PROT_READ|PROT_WRITE, MAP_SHARED, dev->fd, 0);
+	if (dev->map == MAP_FAILED) {
 		printf("could not mmap: %m\n");
-		close(dev.fd);
+		goto err_fd_close;
 	}
 
-	handler = find_handler(dev.cfgstring);
-	if (!handler) {
-		printf("could not find handler for %s\n", dev.name);
-		munmap(dev.map, dev.map_len);
-		close(dev.fd);
-		return -1;
+	dev->handler = find_handler(dev->cfgstring);
+	if (!dev->handler) {
+		printf("could not find handler for %s\n", dev->name);
+		goto err_munmap;
 	}
 
-	ret = handler->open(&dev);
+	ret = dev->handler->open(dev);
 	if (ret < 0) {
-		printf("handler open failed for %s\n", dev.name);
-		munmap(dev.map, dev.map_len);
-		close(dev.fd);
-		return -1;
+		printf("handler open failed for %s\n", dev->name);
+		goto err_munmap;
 	}
 
-	dev.handler = handler;
+	/* dev will be freed by the new thread */
+	ret = pthread_create(&thread.thread_id, NULL, thread_start, dev);
+	if (ret) {
+		printf("Could not start thread\n");
+		goto err_handler_close;
+	}
 
-	darray_append(devices, dev);
+	darray_append(threads, thread);
 
 	return 0;
+
+err_handler_close:
+	dev->handler->close(dev);
+err_munmap:
+	munmap(dev->map, dev->map_len);
+err_fd_close:
+	close(dev->fd);
+err_free:
+	free(dev);
+
+	return -1;
 }
 
 void remove_device(char *dev_name, char *cfgstring)
 {
-	struct tcmu_device *dev;
+	struct tcmu_thread *thread;
 	int i = 0;
 	bool found = false;
 	int ret;
+	void *join_retval;
 
-	darray_foreach(dev, devices) {
-		if (strncmp(dev->name, dev_name, strnlen(dev->name, sizeof(dev->name))))
+	darray_foreach(thread, threads) {
+		if (strncmp(thread->dev_name, dev_name, strnlen(thread->dev_name, sizeof(thread->dev_name))))
 			i++;
 		else {
 			found = true;
@@ -349,16 +486,22 @@ void remove_device(char *dev_name, char *cfgstring)
 		return;
 	}
 
-	if (dev->handler)
-		dev->handler->close(dev);
+	ret = pthread_cancel(thread->thread_id);
+	if (ret) {
+		printf("pthread_cancel failed with value %d\n", ret);
+		return;
+	}
 
-	ret = munmap(dev->map, dev->map_len);
-	if (ret < 0)
-		printf("munmap of %s failed\n", dev->name);
+	ret = pthread_join(thread->thread_id, &join_retval);
+	if (ret) {
+		printf("pthread_join failed with value %d\n", ret);
+		return;
+	}
 
-	close(dev->fd);
+	if (join_retval != PTHREAD_CANCELED)
+		printf("unexpected join retval: %p\n", join_retval);
 
-	darray_remove(devices, i);
+	darray_remove(threads, i);
 }
 
 int open_devices(void)
@@ -409,131 +552,6 @@ int open_devices(void)
 	return num_good_devs;
 }
 
-int block_size = 4096;
-
-int handle_one_command(struct tcmu_device *dev,
-		       struct tcmu_mailbox *mb,
-		       struct tcmu_cmd_entry *ent)
-{
-	uint8_t *cdb;
-	int i;
-
-	cdb = (void *)mb + ent->req.cdb_off;
-
-	/* Convert iovec addrs in-place to not be offsets */
-	for (i = 0; i < ent->req.iov_cnt; i++)
-		ent->req.iov[i].iov_base = (void *) mb + (size_t)ent->req.iov[i].iov_base;
-
-	return dev->handler->cmd_submit(dev, cdb, ent->req.iov);
-}
-
-void poke_kernel(int fd)
-{
-	uint32_t buf = 0xabcdef12;
-
-	printf("poke kernel\n");
-	write(fd, &buf, 4);
-}
-
-int handle_device_event(struct tcmu_device *dev)
-{
-	struct tcmu_cmd_entry *ent;
-	struct tcmu_mailbox *mb = dev->map;
-	int did_some_work = 0;
-
-	ent = (void *) mb + mb->cmdr_off + mb->cmd_tail;
-
-	printf("ent addr1 %p mb %p cmd_tail %u cmd_head %u\n", ent, mb, mb->cmd_tail, mb->cmd_head);
-
-	while (ent != (void *)mb + mb->cmdr_off + mb->cmd_head) {
-
-		if (tcmu_hdr_get_op(&ent->hdr) == TCMU_OP_CMD) {
-			printf("handling a command entry, len %d\n", tcmu_hdr_get_len(&ent->hdr));
-			if (handle_one_command(dev, mb, ent)) {
-				ent->rsp.scsi_status = NO_SENSE;
-			}
-			else {
-				/* Tell the kernel we didn't handle it */
-				char *buf = ent->rsp.sense_buffer;
-
-				ent->rsp.scsi_status = CHECK_CONDITION;
-
-				buf[0] = 0x70;	/* fixed, current */
-				buf[2] = 0x5;	/* illegal request */
-				buf[7] = 0xa;
-				buf[12] = 0x20;	/* ASC: invalid command operation code */
-				buf[13] = 0x0;	/* ASCQ: (none) */
-			}
-
-		}
-		else {
-			printf("handling a pad entry, len %d\n", tcmu_hdr_get_len(&ent->hdr));
-		}
-
-		mb->cmd_tail = (mb->cmd_tail + tcmu_hdr_get_len(&ent->hdr)) % mb->cmdr_size;
-		ent = (void *) mb + mb->cmdr_off + mb->cmd_tail;
-		printf("ent addr2 %p\n", ent);
-		did_some_work = 1;
-	}
-
-	if (did_some_work)
-		poke_kernel(dev->fd);
-
-	return 0;
-}
-
-int event_poll(struct nl_sock *sock)
-{
-	int ret;
-	struct pollfd *pollfds;
-	int i = 0;
-	int num_poll_fds;
-	struct tcmu_device *dev;
-	int events;
-
-	num_poll_fds = darray_size(devices) + 1;
-
-	/* +1 for netlink socket */
-	pollfds = calloc(num_poll_fds, sizeof(struct pollfd));
-	if (!pollfds) {
-		printf("couldn't alloc pollfds\n");
-		exit(1);
-	}
-
-	/* polling 0..n device fds followed by the one netlink fd */
-	darray_foreach(dev, devices) {
-		pollfds[i].fd = dev->fd;
-		pollfds[i].events = POLLIN;
-		i++;
-	}
-	pollfds[i].fd = nl_socket_get_fd(sock);
-	pollfds[i].events = POLLIN;
-	assert(i == num_poll_fds-1);
-
-	events = poll(pollfds, num_poll_fds, -1);
-	printf("%d fds active\n", events);
-
-	for (i = 0; events && i < num_poll_fds; i++) {
-		if (pollfds[i].revents) {
-			if (i == num_poll_fds-1) {
-				ret = nl_recvmsgs_default(sock);
-				if (ret < 0)
-					printf("nl_recvmsgs error %d\n", ret);
-			} else {
-				ret = handle_device_event(&darray_item(devices, i));
-				if (ret < 0)
-					printf("handle_device_event error %d\n", ret);
-			}
-
-			events--;
-		}
-	}
-
-	free(pollfds);
-
-	return 0;
-}
-
 int main()
 {
 	struct nl_sock *nl_sock;
@@ -563,9 +581,9 @@ int main()
 	}
 
 	while (1) {
-		ret = event_poll(nl_sock);
+		ret = nl_recvmsgs_default(nl_sock);
 		if (ret < 0) {
-			printf("event poll returned %d", ret);
+			printf("nl_recvmsgs_default poll returned %d", ret);
 			exit(1);
 		}
 	}
