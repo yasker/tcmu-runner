@@ -266,8 +266,6 @@ struct tcmu_handler *find_handler(char *cfgstring)
 	return NULL;
 }
 
-int block_size = 4096;
-
 int handle_one_command(struct tcmu_device *dev,
 		       struct tcmu_mailbox *mb,
 		       struct tcmu_cmd_entry *ent)
@@ -400,7 +398,7 @@ int add_device(char *dev_name, char *cfgstring)
 
 	dev->fd = open(str_buf, O_RDWR);
 	if (dev->fd == -1) {
-		printf("could not open %s\n", dev->name);
+		printf("could not open %s\n", str_buf);
 		goto err_free;
 	}
 
