@@ -31,6 +31,7 @@
 #include <dlfcn.h>
 #include <scsi/scsi.h>
 #include <pthread.h>
+#include <signal.h>
 
 #include <libnl3/netlink/genl/genl.h>
 #include <libnl3/netlink/genl/mngt.h>
@@ -464,13 +465,32 @@ err_free:
 	return -1;
 }
 
+void cancel_thread(pthread_t thread)
+{
+	void *join_retval;
+	int ret;
+
+	ret = pthread_cancel(thread);
+	if (ret) {
+		printf("pthread_cancel failed with value %d\n", ret);
+		return;
+	}
+
+	ret = pthread_join(thread, &join_retval);
+	if (ret) {
+		printf("pthread_join failed with value %d\n", ret);
+		return;
+	}
+
+	if (join_retval != PTHREAD_CANCELED)
+		printf("unexpected join retval: %p\n", join_retval);
+}
+
 void remove_device(char *dev_name, char *cfgstring)
 {
 	struct tcmu_thread *thread;
 	int i = 0;
 	bool found = false;
-	int ret;
-	void *join_retval;
 
 	darray_foreach(thread, threads) {
 		if (strncmp(thread->dev_name, dev_name, strnlen(thread->dev_name, sizeof(thread->dev_name))))
@@ -486,20 +506,7 @@ void remove_device(char *dev_name, char *cfgstring)
 		return;
 	}
 
-	ret = pthread_cancel(thread->thread_id);
-	if (ret) {
-		printf("pthread_cancel failed with value %d\n", ret);
-		return;
-	}
-
-	ret = pthread_join(thread->thread_id, &join_retval);
-	if (ret) {
-		printf("pthread_join failed with value %d\n", ret);
-		return;
-	}
-
-	if (join_retval != PTHREAD_CANCELED)
-		printf("unexpected join retval: %p\n", join_retval);
+	cancel_thread(thread->thread_id);
 
 	darray_remove(threads, i);
 }
@@ -552,6 +559,23 @@ int open_devices(void)
 	return num_good_devs;
 }
 
+void sighandler(int signal)
+{
+	struct tcmu_thread *thread;
+
+	printf("signal %d received!\n", signal);
+
+	darray_foreach(thread, threads) {
+		cancel_thread(thread->thread_id);
+	}
+
+	exit(1);
+}
+
+struct sigaction tcmu_sigaction = {
+	.sa_handler = sighandler,
+};
+
 int main()
 {
 	struct nl_sock *nl_sock;
@@ -577,6 +601,12 @@ int main()
 	printf("%d devices found\n", ret);
 	if (ret < 0) {
 		printf("couldn't open devices\n");
+		exit(1);
+	}
+
+	ret = sigaction(SIGINT, &tcmu_sigaction, NULL);
+	if (ret) {
+		printf("couldn't set sigaction\n");
 		exit(1);
 	}
 
