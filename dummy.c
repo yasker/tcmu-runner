@@ -13,8 +13,6 @@
 #include "../kernel/drivers/target/target_core_user.h"
 #include "tcmu-runner.h"
 
-int block_size = 4096;
-
 struct dummy_state {
 	int fd;
 	unsigned long long num_lbas;
@@ -89,7 +87,7 @@ bool dummy_cmd_submit(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec
 		int i;
 		int remaining;
 		int lba = be32toh(*((u_int32_t *)&cdb[2]));
-		int length = be16toh(*((uint16_t *)&cdb[7])) * block_size;
+		int length = be16toh(*((uint16_t *)&cdb[7])) * state->block_size;
 		off_t ret;
 		void *tmp_ptr;
 
@@ -104,7 +102,7 @@ bool dummy_cmd_submit(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec
 			return false;
 		memset(buf, 0, length);
 
-		ret = lseek(state->fd, lba*block_size, SEEK_SET);
+		ret = lseek(state->fd, lba * state->block_size, SEEK_SET);
 		if (ret == -1) {
 			printf("lseek failed: %m\n");
 			free(buf);
