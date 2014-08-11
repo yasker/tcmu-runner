@@ -17,11 +17,14 @@ int block_size = 4096;
 
 struct dummy_state {
 	int fd;
+	unsigned long long num_lbas;
+	unsigned int block_size;
 };
 
 int dummy_open(struct tcmu_device *dev)
 {
 	struct dummy_state *state;
+	long long size;
 
 	state = calloc(1, sizeof(*state));
 	if (!state)
@@ -35,6 +38,22 @@ int dummy_open(struct tcmu_device *dev)
 		return -1;
 	}
 
+	state->block_size = tcmu_get_attribute(dev, "hw_block_size");
+	if (state->block_size == -1) {
+		printf("Could not get device block size\n");
+		return -1;
+	}
+
+	size = tcmu_get_device_size(dev);
+	if (size == -1) {
+		printf("Could not get device size\n");
+		return -1;
+	}
+
+	state->num_lbas = size / state->block_size;
+
+	printf("handler lbas = %llu each block is %u\n", state->num_lbas, state->block_size);
+
 	return 0;
 }
 
@@ -45,6 +64,8 @@ void dummy_close(struct tcmu_device *dev)
 	state = dev->hm_private;
 
 	close(state->fd);
+
+	free(state);
 }
 
 /*

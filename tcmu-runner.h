@@ -6,11 +6,16 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
+#include <stdint.h>
+
 struct tcmu_device {
 	int fd;
 	void *map;
 	size_t map_len;
-	char name[16]; /* e.g. "uio14" */
+	char dev_name[16]; /* e.g. "uio14" */
+	char tcm_hba_name[16]; /* e.g. "user_8" */
+	char tcm_dev_name[128]; /* e.g. "backup2" */
 	char cfgstring[256];
 
 	struct tcmu_handler *handler;
@@ -28,6 +33,10 @@ struct tcmu_handler {
 
 	bool (*cmd_submit)(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec);
 };
+
+/* handler->core API */
+int tcmu_get_attribute(struct tcmu_device *dev, char *name);
+long long tcmu_get_device_size(struct tcmu_device *dev);
 
 #ifdef __cplusplus
 }

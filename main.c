@@ -16,7 +16,6 @@
 
 #define _GNU_SOURCE
 #define _BITS_UIO_H
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
@@ -242,8 +241,7 @@ int is_uio(const struct dirent *dirent)
 	}
 
 	/* we only want uio devices whose name is a format we expect */
-	snprintf(tmp_path, sizeof(tmp_path), "tcm-user+%s/", "srv");
-	if (strncmp(buf, "tcm-user+", 9))
+	if (strncmp(buf, "tcm-user", 8))
 		return 0;
 
 	return 1;
@@ -353,7 +351,7 @@ void *thread_start(void *arg)
 {
 	struct tcmu_device *dev = arg;
 
-	printf("in thread for dev %s\n", dev->name);
+	printf("in thread for dev %s\n", dev->dev_name);
 
 	pthread_cleanup_push(thread_cleanup, dev);
 
@@ -383,6 +381,8 @@ int add_device(char *dev_name, char *cfgstring)
 	char str_buf[64];
 	int fd;
 	int ret;
+	char *ptr, *oldptr;
+	int len;
 
 	dev = calloc(1, sizeof(*dev));
 	if (!dev) {
@@ -390,9 +390,46 @@ int add_device(char *dev_name, char *cfgstring)
 		return -1;
 	}
 
-	snprintf(dev->name, sizeof(dev->name), "%s", dev_name);
+	snprintf(dev->dev_name, sizeof(dev->dev_name), "%s", dev_name);
 	snprintf(thread.dev_name, sizeof(thread.dev_name), "%s", dev_name);
-	snprintf(dev->cfgstring, sizeof(dev->cfgstring), "%s", cfgstring+9);
+
+	oldptr = cfgstring;
+	ptr = strchr(oldptr, '/');
+	if (!ptr) {
+		printf("invalid cfgstring\n");
+		return -1;
+	}
+
+	if (strncmp(cfgstring, "tcm-user", ptr-oldptr)) {
+		printf("invalid cfgstring\n");
+		return -1;
+	}
+
+	/* Get HBA name */
+	oldptr = ptr+1;
+	ptr = strchr(oldptr, '/');
+	if (!ptr) {
+		printf("invalid cfgstring\n");
+		return -1;
+	}
+	len = ptr-oldptr;
+	snprintf(dev->tcm_hba_name, sizeof(dev->tcm_hba_name), "user_%.*s", len, oldptr);
+
+	/* Get device name */
+	oldptr = ptr+1;
+	ptr = strchr(oldptr, '/');
+	if (!ptr) {
+		printf("invalid cfgstring\n");
+		return -1;
+	}
+	len = ptr-oldptr;
+	snprintf(dev->tcm_dev_name, sizeof(dev->tcm_dev_name), "%.*s", len, oldptr);
+
+	/* The rest is the handler-specific cfgstring */
+	oldptr = ptr+1;
+	ptr = strchr(oldptr, '/');
+	snprintf(dev->cfgstring, sizeof(dev->cfgstring), "%s", oldptr);
+
 	snprintf(str_buf, sizeof(str_buf), "/dev/%s", dev_name);
 	printf("dev %s\n", str_buf);
 
@@ -402,10 +439,10 @@ int add_device(char *dev_name, char *cfgstring)
 		goto err_free;
 	}
 
-	snprintf(str_buf, sizeof(str_buf), "/sys/class/uio/%s/maps/map0/size", dev->name);
+	snprintf(str_buf, sizeof(str_buf), "/sys/class/uio/%s/maps/map0/size", dev->dev_name);
 	fd = open(str_buf, O_RDONLY);
 	if (fd == -1) {
-		printf("could not open %s\n", dev->name);
+		printf("could not open %s\n", dev->dev_name);
 		goto err_fd_close;
 	}
 
@@ -430,13 +467,13 @@ int add_device(char *dev_name, char *cfgstring)
 
 	dev->handler = find_handler(dev->cfgstring);
 	if (!dev->handler) {
-		printf("could not find handler for %s\n", dev->name);
+		printf("could not find handler for %s\n", dev->dev_name);
 		goto err_munmap;
 	}
 
 	ret = dev->handler->open(dev);
 	if (ret < 0) {
-		printf("handler open failed for %s\n", dev->name);
+		printf("handler open failed for %s\n", dev->dev_name);
 		goto err_munmap;
 	}
 
