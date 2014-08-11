@@ -239,6 +239,7 @@ int is_uio(const struct dirent *dirent)
 		printf("read of %s had issues\n", tmp_path);
 		return 0;
 	}
+	buf[ret-1] = '\0'; /* null-terminate and chop off the \n */
 
 	/* we only want uio devices whose name is a format we expect */
 	if (strncmp(buf, "tcm-user", 8))
@@ -250,14 +251,14 @@ int is_uio(const struct dirent *dirent)
 struct tcmu_handler *find_handler(char *cfgstring)
 {
 	struct tcmu_handler *handler;
-	char *subtype;
+	size_t len;
+	char *found_at;
 
-	subtype = strtok(cfgstring, "/");
-	if (!subtype)
-		subtype = cfgstring;
+	found_at = strchrnul(cfgstring, '/');
+	len = found_at - cfgstring;
 
 	darray_foreach(handler, handlers) {
-		if (!strcmp(subtype, handler->subtype))
+		if (!strncmp(cfgstring, handler->subtype, len))
 		    return handler;
 	}
 
@@ -378,7 +379,7 @@ int add_device(char *dev_name, char *cfgstring)
 {
 	struct tcmu_device *dev;
 	struct tcmu_thread thread;
-	char str_buf[64];
+	char str_buf[256];
 	int fd;
 	int ret;
 	char *ptr, *oldptr;
@@ -452,6 +453,7 @@ int add_device(char *dev_name, char *cfgstring)
 		printf("could not read size of map0\n");
 		goto err_fd_close;
 	}
+	str_buf[ret-1] = '\0'; /* null-terminate and chop off the \n */
 
 	dev->map_len = strtoull(str_buf, NULL, 0);
 	if (dev->map_len == ULLONG_MAX) {
@@ -579,6 +581,7 @@ int open_devices(void)
 			printf("read of %s had issues\n", tmp_path);
 			continue;
 		}
+		buf[ret-1] = '\0'; /* null-terminate and chop off the \n */
 
 		ret = add_device(dirent_list[i]->d_name, buf);
 		if (ret < 0)
