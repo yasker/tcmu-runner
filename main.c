@@ -214,6 +214,8 @@ int open_handlers(void)
 		num_good++;
 	}
 
+	for (i = 0; i < num_handlers; i++)
+		free(dirent_list[i]);
 	free(dirent_list);
 
 	return num_good;
