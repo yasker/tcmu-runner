@@ -170,8 +170,7 @@ bool dummy_cmd_submit(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec
 	}
 }
 
-
-struct tcmu_handler handler_struct = {
+struct tcmu_handler dummy_handler = {
 	.name = "Dummy Handler",
 	.subtype = "dummy",
 
@@ -179,3 +178,8 @@ struct tcmu_handler handler_struct = {
 	.close = dummy_close,
 	.cmd_submit = dummy_cmd_submit,
 };
+
+void handler_init(void)
+{
+	tcmu_register_handler(&dummy_handler);
+}

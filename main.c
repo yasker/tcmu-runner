@@ -163,6 +163,11 @@ int is_handler(const struct dirent *dirent)
 	return 1;
 }
 
+void tcmu_register_handler(struct tcmu_handler *handler)
+{
+	darray_append(handlers, *handler);
+}
+
 int open_handlers(void)
 {
 	struct dirent **dirent_list;
@@ -178,7 +183,7 @@ int open_handlers(void)
 	for (i = 0; i < num_handlers; i++) {
 		char *path;
 		void *handle;
-		struct tcmu_handler *tcmu_handler;
+		void (*handler_init)(void);
 		int ret;
 
 		ret = asprintf(&path, "%s/%s", HANDLER_PATH, dirent_list[i]->d_name);
@@ -195,14 +200,14 @@ int open_handlers(void)
 			continue;
 		}
 
-		tcmu_handler = dlsym(handle, "handler_struct");
-		if (!tcmu_handler) {
+		handler_init = dlsym(handle, "handler_init");
+		if (!handler_init) {
 			printf("dlsym failure on %s\n", path);
 			free(path);
 			continue;
 		}
 
-		darray_append(handlers, *tcmu_handler);
+		handler_init();
 
 		free(path);
 

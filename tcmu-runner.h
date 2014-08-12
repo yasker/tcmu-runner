@@ -35,6 +35,7 @@ struct tcmu_handler {
 };
 
 /* handler->core API */
+void tcmu_register_handler(struct tcmu_handler *handler);
 int tcmu_get_attribute(struct tcmu_device *dev, char *name);
 long long tcmu_get_device_size(struct tcmu_device *dev);
 
