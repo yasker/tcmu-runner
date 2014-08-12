@@ -81,43 +81,47 @@ void dummy_close(struct tcmu_device *dev)
  */
 bool dummy_cmd_submit(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec)
 {
+	struct dummy_state *state = dev->hm_private;
 	uint8_t cmd;
-	void *buf;
-	struct dummy_state *state;
-
-	state = dev->hm_private;
-
-	printf("handling a command!\n");
+	int i;
+	int remaining;
+	int lba = be32toh(*((u_int32_t *)&cdb[2]));
+	int length = be16toh(*((uint16_t *)&cdb[7])) * state->block_size;
+	size_t ret;
 
 	cmd = cdb[0];
 
 	printf("cmd = 0x%x\n", cmd);
 
+	for (i = 0; i < 10; i++) {
+		printf("%x ", cdb[i]);
+	}
+	printf("\n");
+	printf("lba %d length %d\n", lba, length);
+
+	ret = lseek(state->fd, lba * state->block_size, SEEK_SET);
+	if (ret == -1) {
+		printf("lseek failed: %m\n");
+		return false;
+	}
+
+	remaining = length;
+
 	if (cmd == 0x28) { // READ 10
-		int i;
-		int remaining;
-		int lba = be32toh(*((u_int32_t *)&cdb[2]));
-		int length = be16toh(*((uint16_t *)&cdb[7])) * state->block_size;
-		off_t ret;
+		void *buf;
 		void *tmp_ptr;
-
-		for (i = 0; i < 10; i++) {
-			printf("%x ", cdb[i]);
-		}
-		printf("\n");
-		printf("lba %d length %d\n", lba, length);
-
-		buf = malloc(length);
-		if (!buf)
-			return false;
-		memset(buf, 0, length);
 
 		ret = lseek(state->fd, lba * state->block_size, SEEK_SET);
 		if (ret == -1) {
 			printf("lseek failed: %m\n");
-			free(buf);
 			return false;
 		}
+
+		/* Using this buf DTRT even if seek is beyond EOF */
+		buf = malloc(length);
+		if (!buf)
+			return false;
+		memset(buf, 0, length);
 
 		ret = read(state->fd, buf, length);
 		if (ret == -1) {
@@ -126,7 +130,6 @@ bool dummy_cmd_submit(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec
 			return false;
 		}
 
-		remaining = length;
 		tmp_ptr = buf;
 
 		while (remaining) {
@@ -145,7 +148,25 @@ bool dummy_cmd_submit(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec
 
 		return true;
 	}
-	else {
+	else if (cmd == 0x2a) { // WRITE 10
+
+		while (remaining) {
+			unsigned int to_copy;
+
+			to_copy = (remaining > iovec->iov_len) ? iovec->iov_len : remaining;
+
+			ret = write(state->fd, iovec->iov_base, to_copy);
+			if (ret == -1) {
+				printf("Could not write: %m\n");
+				return false;
+			}
+
+			remaining -= to_copy;
+			iovec++;
+		}
+
+		return true;
+	} else {
 		printf("unknown command %x\n", cdb[0]);
 
 		return false;
