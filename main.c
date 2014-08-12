@@ -387,12 +387,12 @@ int add_device(char *dev_name, char *cfgstring)
 	ptr = strchr(oldptr, '/');
 	if (!ptr) {
 		printf("invalid cfgstring\n");
-		return -1;
+		goto err_free;
 	}
 
 	if (strncmp(cfgstring, "tcm-user", ptr-oldptr)) {
 		printf("invalid cfgstring\n");
-		return -1;
+		goto err_free;
 	}
 
 	/* Get HBA name */
@@ -400,7 +400,7 @@ int add_device(char *dev_name, char *cfgstring)
 	ptr = strchr(oldptr, '/');
 	if (!ptr) {
 		printf("invalid cfgstring\n");
-		return -1;
+		goto err_free;
 	}
 	len = ptr-oldptr;
 	snprintf(dev->tcm_hba_name, sizeof(dev->tcm_hba_name), "user_%.*s", len, oldptr);
@@ -410,7 +410,7 @@ int add_device(char *dev_name, char *cfgstring)
 	ptr = strchr(oldptr, '/');
 	if (!ptr) {
 		printf("invalid cfgstring\n");
-		return -1;
+		goto err_free;
 	}
 	len = ptr-oldptr;
 	snprintf(dev->tcm_dev_name, sizeof(dev->tcm_dev_name), "%.*s", len, oldptr);
