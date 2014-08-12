@@ -285,7 +285,6 @@ void poke_kernel(int fd)
 {
 	uint32_t buf = 0xabcdef12;
 
-	printf("poke kernel\n");
 	write(fd, &buf, 4);
 }
 
@@ -297,16 +296,12 @@ int handle_device_events(struct tcmu_device *dev)
 
 	ent = (void *) mb + mb->cmdr_off + mb->cmd_tail;
 
-	printf("ent addr1 %p mb %p cmd_tail %u cmd_head %u\n", ent, mb, mb->cmd_tail, mb->cmd_head);
-
 	while (ent != (void *)mb + mb->cmdr_off + mb->cmd_head) {
 
 		if (tcmu_hdr_get_op(&ent->hdr) == TCMU_OP_CMD) {
-			printf("handling a command entry, len %d\n", tcmu_hdr_get_len(&ent->hdr));
 			if (handle_one_command(dev, mb, ent)) {
 				ent->rsp.scsi_status = NO_SENSE;
-			}
-			else {
+			} else {
 				/* Tell the kernel we didn't handle it */
 				char *buf = ent->rsp.sense_buffer;
 
@@ -318,15 +313,13 @@ int handle_device_events(struct tcmu_device *dev)
 				buf[12] = 0x20;	/* ASC: invalid command operation code */
 				buf[13] = 0x0;	/* ASCQ: (none) */
 			}
-
 		}
 		else {
-			printf("handling a pad entry, len %d\n", tcmu_hdr_get_len(&ent->hdr));
+			/* Do nothing for PAD entries */
 		}
 
 		mb->cmd_tail = (mb->cmd_tail + tcmu_hdr_get_len(&ent->hdr)) % mb->cmdr_size;
 		ent = (void *) mb + mb->cmdr_off + mb->cmd_tail;
-		printf("ent addr2 %p\n", ent);
 		did_some_work = 1;
 	}
 
@@ -340,8 +333,6 @@ void thread_cleanup(void *arg)
 {
 	struct tcmu_device *dev = arg;
 
-	printf("in thread cleanup\n");
-
 	dev->handler->close(dev);
 	munmap(dev->map, dev->map_len);
 	close(dev->fd);
@@ -351,8 +342,6 @@ void thread_cleanup(void *arg)
 void *thread_start(void *arg)
 {
 	struct tcmu_device *dev = arg;
-
-	printf("in thread for dev %s\n", dev->dev_name);
 
 	pthread_cleanup_push(thread_cleanup, dev);
 
@@ -432,7 +421,6 @@ int add_device(char *dev_name, char *cfgstring)
 	snprintf(dev->cfgstring, sizeof(dev->cfgstring), "%s", oldptr);
 
 	snprintf(str_buf, sizeof(str_buf), "/dev/%s", dev_name);
-	printf("dev %s\n", str_buf);
 
 	dev->fd = open(str_buf, O_RDWR);
 	if (dev->fd == -1) {

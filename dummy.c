@@ -91,13 +91,10 @@ bool dummy_cmd_submit(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec
 
 	cmd = cdb[0];
 
-	printf("cmd = 0x%x\n", cmd);
-
 	for (i = 0; i < 10; i++) {
 		printf("%x ", cdb[i]);
 	}
 	printf("\n");
-	printf("lba %d length %d\n", lba, length);
 
 	ret = lseek(state->fd, lba * state->block_size, SEEK_SET);
 	if (ret == -1) {
