@@ -43,8 +43,6 @@
 
 #define HANDLER_PATH "."
 
-darray(struct tcmu_device) devices = darray_new();
-
 darray(struct tcmu_handler) handlers = darray_new();
 
 struct tcmu_thread {
