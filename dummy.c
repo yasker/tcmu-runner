@@ -23,6 +23,7 @@ int dummy_open(struct tcmu_device *dev)
 {
 	struct dummy_state *state;
 	long long size;
+	char *config;
 
 	state = calloc(1, sizeof(*state));
 	if (!state)
@@ -30,29 +31,38 @@ int dummy_open(struct tcmu_device *dev)
 
 	dev->hm_private = state;
 
-	state->fd = open("test.img", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
-	if (state->fd == -1) {
-		printf("could not open: %m\n");
-		return -1;
-	}
-
 	state->block_size = tcmu_get_attribute(dev, "hw_block_size");
 	if (state->block_size == -1) {
 		printf("Could not get device block size\n");
-		return -1;
+		goto err;
 	}
 
 	size = tcmu_get_device_size(dev);
 	if (size == -1) {
 		printf("Could not get device size\n");
-		return -1;
+		goto err;
 	}
 
 	state->num_lbas = size / state->block_size;
 
-	printf("handler lbas = %llu each block is %u\n", state->num_lbas, state->block_size);
+	config = strchr(dev->cfgstring, '/');
+	if (!config) {
+		printf("no configuration found in cfgstring\n");
+		goto err;
+	}
+	config += 1; /* get past '\' */
+
+	state->fd = open(config, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+	if (state->fd == -1) {
+		printf("could not open %s: %m\n", config);
+		goto err;
+	}
 
 	return 0;
+
+err:
+	free(state);
+	return -1;
 }
 
 void dummy_close(struct tcmu_device *dev)
