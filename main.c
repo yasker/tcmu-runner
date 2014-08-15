@@ -350,6 +350,8 @@ void *thread_start(void *arg)
 
 	pthread_cleanup_push(thread_cleanup, dev);
 
+	handle_device_events(dev);
+
 	while (1) {
 		char buf[4];
 		int ret = read(dev->fd, buf, 4);
