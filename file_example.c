@@ -1,3 +1,30 @@
+/*
+ * Copyright 2014, Red Hat, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may
+ * not use this file except in compliance with the License. You may obtain
+ * a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+*/
+
+/*
+ * Example code to demonstrate how a TCMU handler might work.
+ *
+ * Using the example of backing a device by a file to demonstrate:
+ *
+ * 1) Registering with tcmu-runner
+ * 2) Parsing the handler-specific config string as needed for setup
+ * 3) Opening resources as needed
+ * 4) Handling SCSI commands and using the handler API
+ */
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
