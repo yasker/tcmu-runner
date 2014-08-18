@@ -50,7 +50,7 @@ int dummy_open(struct tcmu_device *dev)
 		printf("no configuration found in cfgstring\n");
 		goto err;
 	}
-	config += 1; /* get past '\' */
+	config += 1; /* get past '/' */
 
 	state->fd = open(config, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
 	if (state->fd == -1) {
