@@ -94,12 +94,9 @@ err:
 
 void file_close(struct tcmu_device *dev)
 {
-	struct file_state *state;
-
-	state = dev->hm_private;
+	struct file_state *state = dev->hm_private;
 
 	close(state->fd);
-
 	free(state);
 }
 
