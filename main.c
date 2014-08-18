@@ -283,7 +283,7 @@ int handle_one_command(struct tcmu_device *dev,
 	for (i = 0; i < ent->req.iov_cnt; i++)
 		ent->req.iov[i].iov_base = (void *) mb + (size_t)ent->req.iov[i].iov_base;
 
-	return dev->handler->cmd_submit(dev, cdb, ent->req.iov);
+	return dev->handler->handle_cmd(dev, cdb, ent->req.iov);
 }
 
 void poke_kernel(int fd)

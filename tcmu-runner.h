@@ -31,7 +31,7 @@ struct tcmu_handler {
 	int (*open)(struct tcmu_device *dev);
 	void (*close)(struct tcmu_device *dev);
 
-	bool (*cmd_submit)(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec);
+	bool (*handle_cmd)(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec);
 };
 
 /* handler->core API */

@@ -103,7 +103,7 @@ void file_close(struct tcmu_device *dev)
 /*
  * Return true if handled, false if not
  */
-bool file_cmd_submit(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec)
+bool file_handle_cmd(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec)
 {
 	struct file_state *state = dev->hm_private;
 	uint8_t cmd;
@@ -200,7 +200,7 @@ struct tcmu_handler file_handler = {
 
 	.open = file_open,
 	.close = file_close,
-	.cmd_submit = file_cmd_submit,
+	.handle_cmd = file_handle_cmd,
 };
 
 void handler_init(void)
