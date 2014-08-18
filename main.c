@@ -187,7 +187,6 @@ int open_handlers(void)
 		int ret;
 
 		ret = asprintf(&path, "%s/%s", HANDLER_PATH, dirent_list[i]->d_name);
-		free(dirent_list[i]);
 		if (ret == -1) {
 			printf("ENOMEM\n");
 			continue;
