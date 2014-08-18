@@ -14,6 +14,12 @@
  * under the License.
 */
 
+/*
+ * A daemon that ties handler modules together with TCMU devices exported via
+ * UIO. It listens for device change notifications via netlink, and handles the
+ * messy parts of the TCMU command ring so the handlers don't have to.
+ */
+
 #define _GNU_SOURCE
 #define _BITS_UIO_H
 #include <stdio.h>
