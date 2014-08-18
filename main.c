@@ -273,10 +273,8 @@ int handle_one_command(struct tcmu_device *dev,
 		       struct tcmu_mailbox *mb,
 		       struct tcmu_cmd_entry *ent)
 {
-	uint8_t *cdb;
+	uint8_t *cdb = (void *)mb + ent->req.cdb_off;
 	int i;
-
-	cdb = (void *)mb + ent->req.cdb_off;
 
 	/* Convert iovec addrs in-place to not be offsets */
 	for (i = 0; i < ent->req.iov_cnt; i++)
@@ -294,11 +292,9 @@ void poke_kernel(int fd)
 
 int handle_device_events(struct tcmu_device *dev)
 {
-	struct tcmu_cmd_entry *ent;
 	struct tcmu_mailbox *mb = dev->map;
+	struct tcmu_cmd_entry *ent = (void *) mb + mb->cmdr_off + mb->cmd_tail;
 	int did_some_work = 0;
-
-	ent = (void *) mb + mb->cmdr_off + mb->cmd_tail;
 
 	while (ent != (void *)mb + mb->cmdr_off + mb->cmd_head) {
 
