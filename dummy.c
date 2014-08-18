@@ -13,15 +13,15 @@
 #include "../kernel/drivers/target/target_core_user.h"
 #include "tcmu-runner.h"
 
-struct dummy_state {
+struct file_state {
 	int fd;
 	unsigned long long num_lbas;
 	unsigned int block_size;
 };
 
-int dummy_open(struct tcmu_device *dev)
+int file_open(struct tcmu_device *dev)
 {
-	struct dummy_state *state;
+	struct file_state *state;
 	long long size;
 	char *config;
 
@@ -65,9 +65,9 @@ err:
 	return -1;
 }
 
-void dummy_close(struct tcmu_device *dev)
+void file_close(struct tcmu_device *dev)
 {
-	struct dummy_state *state;
+	struct file_state *state;
 
 	state = dev->hm_private;
 
@@ -79,9 +79,9 @@ void dummy_close(struct tcmu_device *dev)
 /*
  * Return true if handled, false if not
  */
-bool dummy_cmd_submit(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec)
+bool file_cmd_submit(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec)
 {
-	struct dummy_state *state = dev->hm_private;
+	struct file_state *state = dev->hm_private;
 	uint8_t cmd;
 	int i;
 	int remaining;
@@ -170,16 +170,16 @@ bool dummy_cmd_submit(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec
 	}
 }
 
-struct tcmu_handler dummy_handler = {
-	.name = "Dummy Handler",
-	.subtype = "dummy",
+struct tcmu_handler file_handler = {
+	.name = "File-backed Handler (example code)",
+	.subtype = "file",
 
-	.open = dummy_open,
-	.close = dummy_close,
-	.cmd_submit = dummy_cmd_submit,
+	.open = file_open,
+	.close = file_close,
+	.cmd_submit = file_cmd_submit,
 };
 
 void handler_init(void)
 {
-	tcmu_register_handler(&dummy_handler);
+	tcmu_register_handler(&file_handler);
 }
