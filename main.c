@@ -616,21 +616,18 @@ int main()
 	}
 
 	ret = open_handlers();
-	printf("%d handlers found\n", ret);
 	if (ret < 0) {
 		printf("couldn't open handlers\n");
 		exit(1);
 	}
-	else if (!ret) {
-		printf("No handlers, how's this gonna work???\n");
-	}
+	printf("%d handlers found\n", ret);
 
 	ret = open_devices();
-	printf("%d devices found\n", ret);
 	if (ret < 0) {
 		printf("couldn't open devices\n");
 		exit(1);
 	}
+	printf("%d devices found\n", ret);
 
 	ret = sigaction(SIGINT, &tcmu_sigaction, NULL);
 	if (ret) {
