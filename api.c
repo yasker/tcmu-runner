@@ -87,7 +87,7 @@ long long tcmu_get_device_size(struct tcmu_device *dev)
 
 	rover = strstr(buf, " Size: ");
 	if (!rover) {
-		printf("Could not find \"Size: \" in %s\n", path);
+		printf("Could not find \" Size: \" in %s\n", path);
 		return -1;
 	}
 	rover += 7; /* get to the value */
