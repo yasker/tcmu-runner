@@ -203,6 +203,7 @@ struct tcmu_handler file_handler = {
 	.handle_cmd = file_handle_cmd,
 };
 
+/* Entry point must be named "handler_init". */
 void handler_init(void)
 {
 	tcmu_register_handler(&file_handler);
