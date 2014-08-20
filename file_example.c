@@ -109,8 +109,6 @@ bool file_handle_cmd(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec)
 	uint8_t cmd;
 	int i;
 	int remaining;
-	int lba = be32toh(*((u_int32_t *)&cdb[2]));
-	int length = be16toh(*((uint16_t *)&cdb[7])) * state->block_size;
 	size_t ret;
 
 	cmd = cdb[0];
@@ -120,17 +118,13 @@ bool file_handle_cmd(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec)
 	}
 	printf("\n");
 
-	ret = lseek(state->fd, lba * state->block_size, SEEK_SET);
-	if (ret == -1) {
-		printf("lseek failed: %m\n");
-		return false;
-	}
 
-	remaining = length;
 
 	if (cmd == 0x28) { // READ 10
 		void *buf;
 		void *tmp_ptr;
+		int lba = be32toh(*((u_int32_t *)&cdb[2]));
+		int length = be16toh(*((uint16_t *)&cdb[7])) * state->block_size;
 
 		ret = lseek(state->fd, lba * state->block_size, SEEK_SET);
 		if (ret == -1) {
@@ -153,6 +147,8 @@ bool file_handle_cmd(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec)
 
 		tmp_ptr = buf;
 
+		remaining = length;
+
 		while (remaining) {
 			unsigned int to_copy;
 
@@ -170,6 +166,16 @@ bool file_handle_cmd(struct tcmu_device *dev, uint8_t *cdb, struct iovec *iovec)
 		return true;
 	}
 	else if (cmd == 0x2a) { // WRITE 10
+		int lba = be32toh(*((u_int32_t *)&cdb[2]));
+		int length = be16toh(*((uint16_t *)&cdb[7])) * state->block_size;
+
+		ret = lseek(state->fd, lba * state->block_size, SEEK_SET);
+		if (ret == -1) {
+			printf("lseek failed: %m\n");
+			return false;
+		}
+
+		remaining = length;
 
 		while (remaining) {
 			unsigned int to_copy;
