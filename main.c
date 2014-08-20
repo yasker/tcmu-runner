@@ -34,7 +34,6 @@
 #include <sys/mman.h>
 #include <assert.h>
 #include <dlfcn.h>
-#include <scsi/scsi.h>
 #include <pthread.h>
 #include <signal.h>
 
@@ -48,6 +47,10 @@
 #define ARRAY_SIZE(X) (sizeof(X) / sizeof((X)[0]))
 
 #define HANDLER_PATH "."
+
+/* scsi/scsi.h's status codes are wack */
+#define SCSI_NO_SENSE 0
+#define SCSI_CHECK_CONDITION 2
 
 darray(struct tcmu_handler) handlers = darray_new();
 
@@ -275,7 +278,7 @@ struct tcmu_handler *find_handler(char *cfgstring)
 	return NULL;
 }
 
-int handle_one_command(struct tcmu_device *dev,
+bool handle_one_command(struct tcmu_device *dev,
 		       struct tcmu_mailbox *mb,
 		       struct tcmu_cmd_entry *ent)
 {
@@ -306,12 +309,12 @@ int handle_device_events(struct tcmu_device *dev)
 
 		if (tcmu_hdr_get_op(&ent->hdr) == TCMU_OP_CMD) {
 			if (handle_one_command(dev, mb, ent)) {
-				ent->rsp.scsi_status = NO_SENSE;
+				ent->rsp.scsi_status = SCSI_NO_SENSE;
 			} else {
 				/* Tell the kernel we didn't handle it */
 				char *buf = ent->rsp.sense_buffer;
 
-				ent->rsp.scsi_status = CHECK_CONDITION;
+				ent->rsp.scsi_status = SCSI_CHECK_CONDITION;
 
 				buf[0] = 0x70;	/* fixed, current */
 				buf[2] = 0x5;	/* illegal request */
