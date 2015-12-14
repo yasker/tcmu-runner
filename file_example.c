@@ -91,7 +91,6 @@ file_handler_run(void *arg)
 			pthread_cond_wait(&h->cond, &h->mtx);
 		}
 		cmd = h->commands[h->cmd_tail];
-		fprintf(stderr, "handler %d: command %d\n", h->num, h->cmd_tail);
 		pthread_mutex_unlock(&h->mtx);
 
 		/* process command */
