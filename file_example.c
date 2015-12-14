@@ -39,14 +39,104 @@
 #include <endian.h>
 #include <scsi/scsi.h>
 #include <errno.h>
+#include <pthread.h>
+#include <signal.h>
 
 #include "tcmu-runner.h"
+#include "libtcmu.h"
+
+#define NHANDLERS 2
+#define NCOMMANDS 16
+
+struct file_handler {
+	struct tcmu_device *dev;
+	int num;
+
+	pthread_mutex_t mtx;
+	pthread_cond_t cond;
+
+	pthread_t thr;
+	int cmd_head;
+	int cmd_tail;
+	struct tcmulib_cmd *commands[NCOMMANDS];
+};
 
 struct file_state {
 	int fd;
 	uint64_t num_lbas;
 	uint32_t block_size;
+
+	pthread_mutex_t completion_mtx;
+	int curr_handler;
+	struct file_handler h[NHANDLERS];
 };
+
+static int file_handle_cmd(
+	struct tcmu_device *dev,
+	struct tcmulib_cmd *tcmulib_cmd);
+
+static void *
+file_handler_run(void *arg)
+{
+	struct file_handler *h = (struct file_handler *) arg;
+	struct file_state *state = tcmu_get_dev_private(h->dev);
+
+	for (;;) {
+		int result;
+		struct tcmulib_cmd *cmd;
+
+		/* get next command */
+		pthread_mutex_lock(&h->mtx);
+		while (h->cmd_tail == h->cmd_head) {
+			pthread_cond_wait(&h->cond, &h->mtx);
+		}
+		cmd = h->commands[h->cmd_tail];
+		fprintf(stderr, "handler %d: command %d\n", h->num, h->cmd_tail);
+		pthread_mutex_unlock(&h->mtx);
+
+		/* process command */
+		result = file_handle_cmd(h->dev, cmd);
+		pthread_mutex_lock(&state->completion_mtx);
+		tcmulib_async_command_complete(h->dev, cmd, result);
+		pthread_mutex_unlock(&state->completion_mtx);
+
+		/* notify that we can process more commands */
+		pthread_mutex_lock(&h->mtx);
+		h->commands[h->cmd_tail] = NULL;
+		h->cmd_tail = (h->cmd_tail + 1) % NCOMMANDS;
+		pthread_cond_signal(&h->cond);
+		pthread_mutex_unlock(&h->mtx);
+	}
+
+	return NULL;
+}
+
+static void
+file_handler_init(struct file_handler *h, struct tcmu_device *dev, int num)
+{
+	int i;
+
+	h->dev = dev;
+	h->num = num;
+	pthread_mutex_init(&h->mtx, NULL);
+	pthread_cond_init(&h->cond, NULL);
+
+	pthread_create(&h->thr, NULL, file_handler_run, h);
+	h->cmd_head = h->cmd_tail = 0;
+	for (i = 0; i < NCOMMANDS; i++)
+		h->commands[i] = NULL;
+}
+
+static void
+file_handler_destroy(struct file_handler *h)
+{
+	if (h->thr) {
+		pthread_kill(h->thr, SIGINT);
+		pthread_join(h->thr, NULL);
+	}
+	pthread_cond_destroy(&h->cond);
+	pthread_mutex_destroy(&h->mtx);
+}
 
 static bool file_check_config(const char *cfgstring, char **reason)
 {
@@ -80,6 +170,7 @@ static int file_open(struct tcmu_device *dev)
 	struct file_state *state;
 	int64_t size;
 	char *config;
+	int i;
 
 	state = calloc(1, sizeof(*state));
 	if (!state)
@@ -114,6 +205,10 @@ static int file_open(struct tcmu_device *dev)
 		goto err;
 	}
 
+	pthread_mutex_init(&state->completion_mtx, NULL);
+	for (i = 0; i < NHANDLERS; i++)
+		file_handler_init(&state->h[i], dev, i);
+
 	return 0;
 
 err:
@@ -124,6 +219,11 @@ err:
 static void file_close(struct tcmu_device *dev)
 {
 	struct file_state *state = tcmu_get_dev_private(dev);
+	int i;
+
+	for (i = 0; i < NHANDLERS; i++)
+		file_handler_destroy(&state->h[i]);
+	pthread_mutex_destroy(&state->completion_mtx);
 
 	close(state->fd);
 	free(state);
@@ -132,6 +232,28 @@ static void file_close(struct tcmu_device *dev)
 static int set_medium_error(uint8_t *sense)
 {
 	return tcmu_set_sense_data(sense, MEDIUM_ERROR, ASC_READ_ERROR, NULL);
+}
+
+static int file_handle_cmd_async(
+	struct tcmu_device *dev,
+	struct tcmulib_cmd *tcmulib_cmd)
+{
+	struct file_state *state = tcmu_get_dev_private(dev);
+	struct file_handler *h = &state->h[state->curr_handler];
+
+	state->curr_handler = (state->curr_handler + 1) % NHANDLERS;
+
+	/* enqueue command */
+	pthread_mutex_lock(&h->mtx);
+	while ((h->cmd_head + 1) % NCOMMANDS == h->cmd_tail) {
+		pthread_cond_wait(&h->cond, &h->mtx);
+	}
+	h->commands[h->cmd_head] = tcmulib_async_command_init(tcmulib_cmd);
+	h->cmd_head = (h->cmd_head + 1) % NCOMMANDS;
+	pthread_cond_signal(&h->cond);
+	pthread_mutex_unlock(&h->mtx);
+
+	return TCMU_ASYNC_HANDLED;
 }
 
 /*
@@ -262,7 +384,7 @@ static struct tcmur_handler file_handler = {
 
 	.open = file_open,
 	.close = file_close,
-	.handle_cmd = file_handle_cmd,
+	.handle_cmd = file_handle_cmd_async,
 };
 
 /* Entry point must be named "handler_init". */
