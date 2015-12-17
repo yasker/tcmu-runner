@@ -618,8 +618,7 @@ static const unsigned char scsi_command_size_tbl[8] =
 
 #define COMMAND_SIZE(opcode) scsi_command_size_tbl[((opcode) >> 5) & 7]
 
-static inline unsigned
-scsi_command_size(const unsigned char *cdb)
+unsigned tcmu_cdb_len(const uint8_t *cdb)
 {
 	 return (cdb[0] == VARIABLE_LENGTH_CMD) ?
 		 scsi_varlen_cdb_length(cdb) : COMMAND_SIZE(cdb[0]);
@@ -628,7 +627,7 @@ scsi_command_size(const unsigned char *cdb)
 struct tcmulib_cmd *tcmulib_async_command_init(struct tcmulib_cmd *cmd)
 {
 	struct tcmulib_cmd *ret;
-	unsigned cdb_len = scsi_command_size(cmd->cdb);
+	unsigned cdb_len = tcmu_cdb_len(cmd->cdb);
 
 	/* alloc memory for cmd itself, iovec and cdb */
 	ret = malloc(sizeof(*ret) + sizeof(*ret->iovec) * cmd->iov_cnt + cdb_len);

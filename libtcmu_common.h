@@ -51,6 +51,7 @@ struct tcmulib_handler *tcmu_get_dev_handler(struct tcmu_device *dev);
 int tcmu_get_attribute(struct tcmu_device *dev, const char *name);
 long long tcmu_get_device_size(struct tcmu_device *dev);
 uint64_t tcmu_get_lba(uint8_t *cdb);
+unsigned tcmu_cdb_len(const uint8_t *cdb);
 uint32_t tcmu_get_xfer_length(uint8_t *cdb);
 off_t tcmu_compare_with_iovec(void *mem, struct iovec *iovec, size_t size);
 void tcmu_seek_in_iovec(struct iovec *iovec, size_t count);
