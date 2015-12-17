@@ -66,6 +66,7 @@ struct tcmulib_handler {
  * existing program's event loop.
  */
 
+/* Opaque (private) type */
 struct tcmulib_context;
 
 /* Claim subtypes you wish to handle. Returns libtcmu's master fd or -error.*/
