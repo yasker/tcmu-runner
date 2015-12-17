@@ -35,6 +35,7 @@
 
 #include <stdint.h>
 #include <scsi/scsi.h>
+#include <errno.h>
 #define _BITS_UIO_H
 #include <linux/target_core_user.h>
 #include "libtcmu.h"
@@ -75,15 +76,34 @@ static int set_medium_error(uint8_t *sense)
 
 static bool foo_check_config(const char *cfgstring, char **reason)
 {
-	 return true;
+	dbgp("checking: %s\n", cfgstring);
+	return true;
 }
 
 static int foo_open(struct tcmu_device *dev)
 {
-	/* open the backing file */
-	/* alloc private struct 'foo_state' */
-	/* Save a ptr to it in dev->hm_private */
+	struct foo_state *state;
 
+        /* alloc private struct 'foo_state' and stash away disk info */
+        state = malloc(sizeof(*state));
+	if (!state)
+		return -ENOMEM;
+	state->block_size = tcmu_get_attribute(dev, "hw_block_size");
+	state->num_lbas = tcmu_get_device_size(dev) / state->block_size;
+
+	dbgp("openning: %s\n", tcmu_get_dev_cfgstring(dev));
+	
+	/* open the backing file */
+	state->fd = open("storage", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+	if (state->fd == -1) {
+		errp("could not open file: error=%u\n", errno);
+		free(state);
+		return -EINVAL;
+	}
+	
+	/* Save a ptr to it in dev->hm_private */
+	tcmu_set_dev_private(dev, state);
+	
 	/* Add new device to our horrible fixed-length array */
 	tcmu_dev_array[dev_array_len] = dev;
 	dev_array_len++;
@@ -152,9 +172,9 @@ static int foo_handle_cmd(
 }
 
 static struct tcmulib_handler foo_handler = {
-	.name = "Handler for foo devices (example code)",
-	.subtype = "foo",
-	.cfg_desc = "a description goes here",
+	.name = "File-backed Handler (example code)",
+	.subtype = "file",
+	.cfg_desc = "The path to the file to use as a backstore.",
 
 	.check_config = foo_check_config,
 
@@ -188,7 +208,7 @@ int main(int argc, char **argv)
 			pollfds[i+1].events = POLLIN;
 			pollfds[i+1].revents = 0;
 		}
-
+		
 		ret = poll(pollfds, dev_array_len+1, -1);
 
 		if (ret <= 0) {
@@ -208,6 +228,8 @@ int main(int argc, char **argv)
 		}
 
 		for (i = 0; i < dev_array_len; i++) {
+			int completed = 0;
+		  
 			if (pollfds[i+1].revents) {
 				struct tcmulib_cmd cmd;
 				struct tcmu_device *dev = tcmu_dev_array[i];
@@ -218,10 +240,14 @@ int main(int argc, char **argv)
 							     cmd.iovec,
 							     cmd.iov_cnt,
 							     cmd.sense_buf);
-					tcmulib_command_complete(dev, &cmd, ret);
+					if (ret != TCMU_ASYNC_HANDLED) {
+						tcmulib_command_complete(dev, &cmd, ret);
+						completed = 1;
+					}
 				}
 
-				tcmulib_processing_complete(dev);
+				if (completed)
+					tcmulib_processing_complete(dev);
 			}
 		}
 	}
