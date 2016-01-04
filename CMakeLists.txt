@@ -57,6 +57,7 @@ add_library(tcmu_static
 target_include_directories(tcmu_static
   PUBLIC ${LIBNL_INCLUDE_DIR}
   )
+install(TARGETS tcmu_static DESTINATION lib)
 
 # Stuff for building the main binary
 add_executable(tcmu-runner
@@ -131,4 +132,8 @@ configure_file (
   "${PROJECT_SOURCE_DIR}/version.h.in"
   "${PROJECT_BINARY_DIR}/version.h"
   )
+
+# emualte "make check"
+#  - this may eventually have tests...
+add_custom_target(check)
 
